@@ -1,4 +1,4 @@
-﻿Add-Type -AssemblyName PresentationFramework
+Add-Type -AssemblyName PresentationFramework
 Add-Type -AssemblyName PresentationCore
 Add-Type -AssemblyName WindowsBase
 Add-Type -AssemblyName System.Windows.Forms
@@ -99,6 +99,9 @@ function Get-DefaultConfig {
         BossAlertAfterSeconds = 0
         BossMarginTop = 0
         BossMarginBottom = 0
+        BossHighlightAnimationSeconds = 1.5
+        BossHighlightColor = "#FFFFFF"
+        BossRows = @()
     }
 }
 
@@ -111,7 +114,7 @@ function Read-WidgetConfig {
         $config = Get-Content -LiteralPath $script:ConfigPath -Raw | ConvertFrom-Json
         $default = Get-DefaultConfig
 
-        foreach ($name in "X", "Y", "FontSize", "BackgroundColor", "TextColor", "TextColorTransparent", "TextOutlineColor", "TextOutlineColorTransparent", "FontFamily", "TrayIconPath", "TimeFormat", "MeridiemLanguage", "BdoTimeEnabled", "BdoTimeFormat", "BdoIconType", "BdoIconEnabled", "BdoFontSize", "BdoTimeOffsetSeconds", "BdoTextColor", "BdoTextColorTransparent", "BdoTextOutlineColor", "BdoTextOutlineColorTransparent", "BdoFontFamily", "BdoTransitionEnabled", "BdoTransitionFontSize", "BdoTransitionTextColor", "BdoTransitionTextColorTransparent", "BdoTransitionTextOutlineColor", "BdoTransitionTextOutlineColorTransparent", "BdoTransitionFontFamily", "BossAlertEnabled", "BossFontSize", "BossTextColor", "BossTextColorTransparent", "BossTextOutlineColor", "BossTextOutlineColorTransparent", "BossFontFamily", "BossAlertBeforeSeconds", "BossAlertAfterSeconds", "BossMarginTop", "BossMarginBottom") {
+        foreach ($name in "X", "Y", "FontSize", "BackgroundColor", "TextColor", "TextColorTransparent", "TextOutlineColor", "TextOutlineColorTransparent", "FontFamily", "TrayIconPath", "TimeFormat", "MeridiemLanguage", "BdoTimeEnabled", "BdoTimeFormat", "BdoIconType", "BdoIconEnabled", "BdoFontSize", "BdoTimeOffsetSeconds", "BdoTextColor", "BdoTextColorTransparent", "BdoTextOutlineColor", "BdoTextOutlineColorTransparent", "BdoFontFamily", "BdoTransitionEnabled", "BdoTransitionFontSize", "BdoTransitionTextColor", "BdoTransitionTextColorTransparent", "BdoTransitionTextOutlineColor", "BdoTransitionTextOutlineColorTransparent", "BdoTransitionFontFamily", "BossAlertEnabled", "BossFontSize", "BossTextColor", "BossTextColorTransparent", "BossTextOutlineColor", "BossTextOutlineColorTransparent", "BossFontFamily", "BossAlertBeforeSeconds", "BossAlertAfterSeconds", "BossMarginTop", "BossMarginBottom", "BossHighlightAnimationSeconds", "BossHighlightColor", "BossRows") {
             if ($null -eq $config.$name) {
                 $config | Add-Member -NotePropertyName $name -NotePropertyValue $default.$name
             }
@@ -131,6 +134,135 @@ function Read-WidgetConfig {
     catch {
         return Get-DefaultConfig
     }
+}
+
+function Get-BossDayDefinitions {
+    @(
+        [pscustomobject]@{ Key = "Mon"; Label = "월"; DayOfWeek = [System.DayOfWeek]::Monday }
+        [pscustomobject]@{ Key = "Tue"; Label = "화"; DayOfWeek = [System.DayOfWeek]::Tuesday }
+        [pscustomobject]@{ Key = "Wed"; Label = "수"; DayOfWeek = [System.DayOfWeek]::Wednesday }
+        [pscustomobject]@{ Key = "Thu"; Label = "목"; DayOfWeek = [System.DayOfWeek]::Thursday }
+        [pscustomobject]@{ Key = "Fri"; Label = "금"; DayOfWeek = [System.DayOfWeek]::Friday }
+        [pscustomobject]@{ Key = "Sat"; Label = "토"; DayOfWeek = [System.DayOfWeek]::Saturday }
+        [pscustomobject]@{ Key = "Sun"; Label = "일"; DayOfWeek = [System.DayOfWeek]::Sunday }
+    )
+}
+
+function Get-BossDayKey {
+    param([System.DayOfWeek]$DayOfWeek)
+
+    switch ($DayOfWeek) {
+        "Monday" { "Mon" }
+        "Tuesday" { "Tue" }
+        "Wednesday" { "Wed" }
+        "Thursday" { "Thu" }
+        "Friday" { "Fri" }
+        "Saturday" { "Sat" }
+        default { "Sun" }
+    }
+}
+
+function Normalize-BossTime {
+    param([object]$Value)
+
+    $text = ([string]$Value).Trim()
+    if ($text -notmatch '^(\d{1,2}):(\d{1,2})$') {
+        return $null
+    }
+
+    $hour = [int]$matches[1]
+    $minute = [int]$matches[2]
+    if ($hour -lt 0 -or $hour -gt 23 -or $minute -lt 0 -or $minute -gt 59) {
+        return $null
+    }
+
+    "{0:00}:{1:00}" -f $hour, $minute
+}
+
+function Split-BossTimeParts {
+    param([object]$Value)
+
+    $time = Normalize-BossTime $Value
+    if ($null -eq $time) {
+        return [pscustomobject]@{ Hour = "12"; Minute = "00" }
+    }
+
+    $parts = $time.Split(":")
+    [pscustomobject]@{
+        Hour = [string]([int]$parts[0])
+        Minute = "{0:00}" -f ([int]$parts[1])
+    }
+}
+
+function Normalize-BossRows {
+    param([object]$Rows)
+
+    $dayKeys = @((Get-BossDayDefinitions | ForEach-Object { $_.Key }))
+    $normalized = @()
+    foreach ($row in @($Rows)) {
+        if ($null -eq $row) {
+            continue
+        }
+
+        $name = ([string]$row.Name).Trim()
+        $days = @($row.Days) | Where-Object { $dayKeys -contains ([string]$_) } | Select-Object -Unique
+        $times = @($row.Times) | ForEach-Object { Normalize-BossTime $_ } | Where-Object { $null -ne $_ } | Sort-Object -Unique
+        $dayTimes = [ordered]@{}
+        foreach ($key in $dayKeys) {
+            $dayTimes[$key] = @()
+        }
+        if ($row.PSObject.Properties["DayTimes"]) {
+            foreach ($key in $dayKeys) {
+                $value = if ($row.DayTimes.PSObject.Properties[$key]) { $row.DayTimes.PSObject.Properties[$key].Value } else { @() }
+                $dayTimes[$key] = @($value) |
+                    ForEach-Object { Normalize-BossTime $_ } |
+                    Where-Object { $null -ne $_ } |
+                    Sort-Object -Unique
+            }
+        }
+        else {
+            foreach ($key in $days) {
+                $dayTimes[$key] = @($times)
+            }
+        }
+        $days = @($dayKeys | Where-Object { @($dayTimes[$_]).Count -gt 0 })
+        [int]$priority = 0
+        [void][int]::TryParse(([string]$row.Priority), [ref]$priority)
+
+        $normalized += [pscustomobject]@{
+            Name = $name
+            Days = @($days)
+            Times = @($dayTimes.Values | ForEach-Object { $_ } | Sort-Object -Unique)
+            DayTimes = [pscustomobject]$dayTimes
+            Priority = [Math]::Max(0, [Math]::Min(10, $priority))
+            Highlight = [bool]$row.Highlight
+            Alert = if ($null -eq $row.Alert) { $true } else { [bool]$row.Alert }
+        }
+    }
+
+    @($normalized)
+}
+
+function Copy-BossRows {
+    param([object]$Rows)
+
+    @(Normalize-BossRows $Rows | ForEach-Object {
+        [pscustomobject]@{
+            Name = [string]$_.Name
+            Days = @($_.Days)
+            Times = @($_.Times)
+            DayTimes = [pscustomobject]$_.DayTimes
+            Priority = [int]$_.Priority
+            Highlight = [bool]$_.Highlight
+            Alert = [bool]$_.Alert
+        }
+    })
+}
+
+function Get-BossRowsSignature {
+    param([object]$Rows)
+
+    @(Normalize-BossRows $Rows) | ConvertTo-Json -Depth 6 -Compress
 }
 
 function Save-WidgetConfig {
@@ -183,7 +315,10 @@ function Save-WidgetConfig {
         BossAlertAfterSeconds = [int]$script:BossAlertAfterSeconds
         BossMarginTop = [int]$script:BossMarginTop
         BossMarginBottom = [int]$script:BossMarginBottom
-    } | ConvertTo-Json | Set-Content -LiteralPath $script:ConfigPath -Encoding UTF8
+        BossHighlightAnimationSeconds = [double]$script:BossHighlightAnimationSeconds
+        BossHighlightColor = [string]$script:BossHighlightColor
+        BossRows = @(Copy-BossRows $script:BossRows)
+    } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $script:ConfigPath -Encoding UTF8
 }
 
 function Get-SettingsPropertyNames {
@@ -197,7 +332,8 @@ function Get-SettingsPropertyNames {
         "BdoTransitionTextOutlineColor", "BdoTransitionTextOutlineColorTransparent", "BdoTransitionFontFamily",
         "BossAlertEnabled", "BossFontSize", "BossTextColor", "BossTextColorTransparent",
         "BossTextOutlineColor", "BossTextOutlineColorTransparent", "BossFontFamily",
-        "BossAlertBeforeSeconds", "BossAlertAfterSeconds", "BossMarginTop", "BossMarginBottom", "StartupEnabled"
+        "BossAlertBeforeSeconds", "BossAlertAfterSeconds", "BossMarginTop", "BossMarginBottom",
+        "BossHighlightAnimationSeconds", "BossHighlightColor", "BossRows", "StartupEnabled"
     )
 }
 
@@ -243,6 +379,9 @@ function Get-SettingsSnapshot {
         BossAlertAfterSeconds = [int]$script:BossAlertAfterSeconds
         BossMarginTop = [int]$script:BossMarginTop
         BossMarginBottom = [int]$script:BossMarginBottom
+        BossHighlightAnimationSeconds = [double]$script:BossHighlightAnimationSeconds
+        BossHighlightColor = [string]$script:BossHighlightColor
+        BossRows = @(Copy-BossRows $script:BossRows)
         StartupEnabled = [bool](Test-StartupEnabled)
     }
 }
@@ -268,6 +407,12 @@ function Test-SettingsSnapshotEqual {
     }
 
     foreach ($name in (Get-SettingsPropertyNames)) {
+        if ($name -eq "BossRows") {
+            if ((Get-BossRowsSignature $Left.BossRows) -ne (Get-BossRowsSignature $Right.BossRows)) {
+                return $false
+            }
+            continue
+        }
         if ([string]$Left.$name -ne [string]$Right.$name) {
             return $false
         }
@@ -318,6 +463,9 @@ function Set-SettingsVariables {
     $script:BossAlertAfterSeconds = [int]$Snapshot.BossAlertAfterSeconds
     $script:BossMarginTop = [int]$Snapshot.BossMarginTop
     $script:BossMarginBottom = [int]$Snapshot.BossMarginBottom
+    $script:BossHighlightAnimationSeconds = [double]$Snapshot.BossHighlightAnimationSeconds
+    $script:BossHighlightColor = [string]$Snapshot.BossHighlightColor
+    $script:BossRows = @(Copy-BossRows $Snapshot.BossRows)
 }
 
 function Set-StartupState {
@@ -354,6 +502,9 @@ function Apply-SettingsSnapshot {
     Apply-ClockTextStyle
     Apply-BdoTimeStyle
     Apply-BossAlertStyle
+    if ($script:BossAlertPanel) {
+        $script:BossAlertPanel.Children.Clear()
+    }
     Update-ClockText
     Apply-TrayIcon
     Set-StartupState ([bool]$Snapshot.StartupEnabled)
@@ -442,6 +593,10 @@ function Sync-SettingsControlsFromDraft {
         if ($script:BossMarginTopValueText) { $script:BossMarginTopValueText.Text = [string]$draft.BossMarginTop }
         if ($script:BossMarginBottomSlider) { $script:BossMarginBottomSlider.Value = [double]$draft.BossMarginBottom }
         if ($script:BossMarginBottomValueText) { $script:BossMarginBottomValueText.Text = [string]$draft.BossMarginBottom }
+        if ($script:BossHighlightAnimationTextBox) { $script:BossHighlightAnimationTextBox.Text = ([double]$draft.BossHighlightAnimationSeconds).ToString("0.##", [System.Globalization.CultureInfo]::InvariantCulture) }
+        if ($script:BossHighlightColorText) { $script:BossHighlightColorText.Text = [string]$draft.BossHighlightColor }
+        Set-ColorSwatch $script:BossHighlightColorSwatch $draft.BossHighlightColor
+        Refresh-BossRowsEditor
         Set-BossAlertTimeInputControls "Before" ([int]$draft.BossAlertBeforeSeconds)
         Set-BossAlertTimeInputControls "After" ([int]$draft.BossAlertAfterSeconds)
         if ($script:BossTextColorText) { $script:BossTextColorText.Text = [string]$draft.BossTextColor }
@@ -492,6 +647,7 @@ function Set-SettingsDraftValue {
     $script:SettingsDraft.$Name = $Value
     $script:SettingsDirty = -not (Test-SettingsSnapshotEqual $script:SettingsDraft $script:SettingsOriginal)
     Sync-SettingsControlsFromDraft
+    Request-SettingsPreviewUpdate
     return $true
 }
 
@@ -1018,6 +1174,7 @@ function Set-ColorSettingByName {
         "BdoTransitionTextOutlineColor" { Set-BdoTransitionTextOutlineColor $nextValue }
         "BossTextColor" { Set-BossTextColor $nextValue }
         "BossTextOutlineColor" { Set-BossTextOutlineColor $nextValue }
+        "BossHighlightColor" { Set-BossHighlightColor $nextValue }
     }
 }
 
@@ -1099,6 +1256,12 @@ function Get-BossTextOutlineBrush {
     New-ColorBrushOrTransparent $script:BossTextOutlineColor "#000000" $script:BossTextOutlineColorTransparent
 }
 
+function Get-BossHighlightBrush {
+    $baseColor = ConvertTo-WpfColor $script:BossHighlightColor "#FFFFFF"
+    $color = [System.Windows.Media.Color]::FromArgb(180, $baseColor.R, $baseColor.G, $baseColor.B)
+    New-Object System.Windows.Media.SolidColorBrush $color
+}
+
 function Get-OutlineThickness {
     [double][Math]::Max(1.0, [Math]::Round($script:FontSize * 0.04, 1))
 }
@@ -1174,21 +1337,183 @@ function Apply-ClockTextStyle {
 }
 
 function Apply-BossAlertStyle {
-    if (-not $script:BossAlertTextBlock) {
+    if (-not $script:BossAlertPanel -and -not $script:BossAlertTextBlock) {
         return
     }
 
     $bossFontSize = [double][Math]::Max(8, [Math]::Min(48, $script:BossFontSize))
-    $script:BossAlertTextBlock.FontFamily = New-Object System.Windows.Media.FontFamily $script:BossFontFamily
-    $script:BossAlertTextBlock.FontSize = $bossFontSize
-    $script:BossAlertTextBlock.LineHeight = [double]($bossFontSize * 1.12)
-    $script:BossAlertTextBlock.Foreground = Get-BossTextBrush
-    $script:BossAlertTextBlock.Margin = New-Object System.Windows.Thickness 2, $script:BossMarginTop, 2, $script:BossMarginBottom
-    $script:BossAlertTextBlock.Effect = New-Object System.Windows.Media.Effects.DropShadowEffect -Property @{
+    if ($script:BossAlertPanel) {
+        $script:BossAlertPanel.Margin = New-Object System.Windows.Thickness 2, $script:BossMarginTop, 2, $script:BossMarginBottom
+        foreach ($child in @($script:BossAlertPanel.Children)) {
+            if ($child -is [System.Windows.Controls.Border] -and $child.Child -is [System.Windows.Controls.TextBlock]) {
+                Apply-BossAlertTextBlockStyle $child.Child $bossFontSize
+            }
+        }
+    }
+    elseif ($script:BossAlertTextBlock) {
+        Apply-BossAlertTextBlockStyle $script:BossAlertTextBlock $bossFontSize
+        $script:BossAlertTextBlock.Margin = New-Object System.Windows.Thickness 2, $script:BossMarginTop, 2, $script:BossMarginBottom
+    }
+}
+
+function Apply-BossAlertTextBlockStyle {
+    param(
+        [System.Windows.Controls.TextBlock]$TextBlock,
+        [double]$FontSize = ([double][Math]::Max(8, [Math]::Min(48, $script:BossFontSize)))
+    )
+
+    $TextBlock.FontFamily = New-Object System.Windows.Media.FontFamily $script:BossFontFamily
+    $TextBlock.FontSize = $FontSize
+    $TextBlock.LineHeight = [double]($FontSize * 1.32)
+    $TextBlock.Foreground = Get-BossTextBrush
+    $TextBlock.Effect = New-Object System.Windows.Media.Effects.DropShadowEffect -Property @{
         Color = (ConvertTo-WpfColor $script:BossTextOutlineColor "#000000")
         BlurRadius = 0
         ShadowDepth = 1
         Opacity = (Get-OutlineEffectOpacity $script:BossTextOutlineColorTransparent)
+    }
+}
+
+function Start-BossHighlightAnimation {
+    param(
+        [System.Windows.Controls.Border]$Border,
+        [System.Windows.Shapes.Rectangle]$FillElement = $null
+    )
+
+    $brush = Get-BossHighlightBrush
+    $seconds = [double][Math]::Max(0.2, [Math]::Min(10.0, $script:BossHighlightAnimationSeconds))
+
+    if ($FillElement) {
+        $FillElement.Fill = $brush
+        $FillElement.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Stretch
+        $FillElement.Width = [double]::NaN
+        $FillElement.RenderTransformOrigin = New-Object System.Windows.Point 0, 0.5
+        $scale = New-Object System.Windows.Media.ScaleTransform 0, 1
+        $FillElement.RenderTransform = $scale
+        $animation = New-Object System.Windows.Media.Animation.DoubleAnimation
+        $animation.From = 0.0
+        $animation.To = 1.0
+        $animation.Duration = New-Object System.Windows.Duration ([TimeSpan]::FromSeconds($seconds))
+        $animation.AutoReverse = $true
+        $animation.RepeatBehavior = [System.Windows.Media.Animation.RepeatBehavior]::Forever
+        $animation.EasingFunction = New-Object System.Windows.Media.Animation.SineEase -Property @{
+            EasingMode = [System.Windows.Media.Animation.EasingMode]::EaseInOut
+        }
+        $scale.BeginAnimation([System.Windows.Media.ScaleTransform]::ScaleXProperty, $animation)
+    }
+    else {
+        $brush.Opacity = 0.0
+        $Border.Background = $brush
+        $animation = New-Object System.Windows.Media.Animation.DoubleAnimation
+        $animation.From = 0.0
+        $animation.To = 1.0
+        $animation.Duration = New-Object System.Windows.Duration ([TimeSpan]::FromSeconds($seconds))
+        $animation.AutoReverse = $true
+        $animation.RepeatBehavior = [System.Windows.Media.Animation.RepeatBehavior]::Forever
+        $animation.EasingFunction = New-Object System.Windows.Media.Animation.SineEase -Property @{
+            EasingMode = [System.Windows.Media.Animation.EasingMode]::EaseInOut
+        }
+        $brush.BeginAnimation([System.Windows.Media.Brush]::OpacityProperty, $animation)
+    }
+}
+
+function New-BossAlertDisplayItem {
+    param(
+        [string]$Text,
+        [object]$BossParts = @(),
+        [string]$StableKey = $Text
+    )
+
+    $border = New-Object System.Windows.Controls.Border
+    $border.CornerRadius = New-Object System.Windows.CornerRadius 3
+    $border.Padding = New-Object System.Windows.Thickness 0
+    $border.Margin = New-Object System.Windows.Thickness 0, 0, 0, 1
+    $border.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Center
+    $border.Uid = $StableKey
+    $border.Background = [System.Windows.Media.Brushes]::Transparent
+
+    $textBlock = New-Object System.Windows.Controls.TextBlock
+    $textBlock.FontWeight = [System.Windows.FontWeights]::Bold
+    $textBlock.TextAlignment = [System.Windows.TextAlignment]::Center
+    $textBlock.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Center
+    $textBlock.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+    $textBlock.LineStackingStrategy = [System.Windows.LineStackingStrategy]::BlockLineHeight
+    Apply-BossAlertTextBlockStyle $textBlock
+
+    if (@($BossParts).Count -gt 0) {
+        $suffix = $Text -replace '^\[[^\]]+\]', ''
+        $textBlock.Inlines.Add((New-Object System.Windows.Documents.Run "[")) | Out-Null
+        for ($i = 0; $i -lt @($BossParts).Count; $i++) {
+            if ($i -gt 0) {
+                $textBlock.Inlines.Add((New-Object System.Windows.Documents.Run " / ")) | Out-Null
+            }
+            $part = @($BossParts)[$i]
+            if ([bool]$part.Highlight) {
+                $nameBorder = New-Object System.Windows.Controls.Border
+                $nameBorder.CornerRadius = New-Object System.Windows.CornerRadius 3
+                $nameBorder.Padding = New-Object System.Windows.Thickness 2, 1, 2, 1
+                $nameBorder.Margin = New-Object System.Windows.Thickness 0
+                $nameBorder.ClipToBounds = $true
+
+                $nameGrid = New-Object System.Windows.Controls.Grid
+                $fill = New-Object System.Windows.Shapes.Rectangle
+                $fill.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Stretch
+                $fill.VerticalAlignment = [System.Windows.VerticalAlignment]::Stretch
+                $fill.RadiusX = 3
+                $fill.RadiusY = 3
+                $fill.IsHitTestVisible = $false
+                $nameGrid.Children.Add($fill) | Out-Null
+
+                $nameText = New-Object System.Windows.Controls.TextBlock
+                $nameText.Text = [string]$part.Name
+                $nameText.FontWeight = [System.Windows.FontWeights]::Bold
+                $nameText.FontFamily = New-Object System.Windows.Media.FontFamily $script:BossFontFamily
+                $nameText.FontSize = [double][Math]::Max(8, [Math]::Min(48, $script:BossFontSize))
+                $nameText.Foreground = Get-BossTextBrush
+                $nameText.LineHeight = [double]([Math]::Max(8, [Math]::Min(48, $script:BossFontSize)) * 1.2)
+                $nameText.LineStackingStrategy = [System.Windows.LineStackingStrategy]::BlockLineHeight
+                $nameGrid.Children.Add($nameText) | Out-Null
+                $nameBorder.Child = $nameGrid
+                Start-BossHighlightAnimation $nameBorder $fill
+                $textBlock.Inlines.Add((New-Object System.Windows.Documents.InlineUIContainer $nameBorder)) | Out-Null
+            }
+            else {
+                $textBlock.Inlines.Add((New-Object System.Windows.Documents.Run ([string]$part.Name))) | Out-Null
+            }
+        }
+        $suffixRun = New-Object System.Windows.Documents.Run ("]$suffix")
+        $textBlock.Inlines.Add($suffixRun) | Out-Null
+    }
+    else {
+        $textBlock.Text = $Text
+        $suffixRun = $null
+    }
+
+    $border.Child = $textBlock
+    $border.Tag = [pscustomobject]@{
+        TextBlock = $textBlock
+        SuffixRun = $suffixRun
+        HasBossParts = (@($BossParts).Count -gt 0)
+    }
+    $border
+}
+
+function Update-BossAlertDisplayItemText {
+    param(
+        [System.Windows.Controls.Border]$Item,
+        [string]$Text
+    )
+
+    if (-not $Item -or -not $Item.Tag) {
+        return
+    }
+
+    if ([bool]$Item.Tag.HasBossParts -and $Item.Tag.SuffixRun) {
+        $suffix = $Text -replace '^\[[^\]]+\]', ''
+        $Item.Tag.SuffixRun.Text = "]$suffix"
+    }
+    elseif ($Item.Tag.TextBlock) {
+        $Item.Tag.TextBlock.Text = $Text
     }
 }
 
@@ -1376,6 +1701,27 @@ function Get-BossSchedule {
     )
 }
 
+function Get-CustomBossScheduleEntries {
+    foreach ($row in @(Normalize-BossRows $script:BossRows)) {
+        if (-not [bool]$row.Alert -or [string]::IsNullOrWhiteSpace($row.Name) -or @($row.Days).Count -eq 0) {
+            continue
+        }
+
+        foreach ($day in @($row.Days)) {
+            foreach ($time in @($row.DayTimes.PSObject.Properties[$day].Value)) {
+                [pscustomobject]@{
+                    Time = [string]$time
+                    DayKey = [string]$day
+                    Name = [string]$row.Name
+                    Priority = [int]$row.Priority
+                    Highlight = [bool]$row.Highlight
+                    Alert = [bool]$row.Alert
+                }
+            }
+        }
+    }
+}
+
 function Get-BossNameForDay {
     param(
         [object]$Entry,
@@ -1390,6 +1736,36 @@ function Get-BossNameForDay {
         "Friday" { return $Entry.Fri }
         "Saturday" { return $Entry.Sat }
         default { return $Entry.Sun }
+    }
+}
+
+function Get-BossScheduleEventsForDay {
+    param([System.DayOfWeek]$DayOfWeek)
+
+    $dayKey = Get-BossDayKey $DayOfWeek
+    foreach ($entry in (Get-BossSchedule)) {
+        $bossName = Get-BossNameForDay $entry $DayOfWeek
+        if ([string]::IsNullOrWhiteSpace($bossName)) {
+            continue
+        }
+
+        [pscustomobject]@{
+            Time = [string]$entry.Time
+            Name = [string]$bossName
+            Priority = 10
+            Highlight = $false
+            Alert = $true
+        }
+    }
+
+    foreach ($entry in (Get-CustomBossScheduleEntries | Where-Object { $_.DayKey -eq $dayKey })) {
+        [pscustomobject]@{
+            Time = [string]$entry.Time
+            Name = [string]$entry.Name
+            Priority = [int]$entry.Priority
+            Highlight = [bool]$entry.Highlight
+            Alert = [bool]$entry.Alert
+        }
     }
 }
 
@@ -1426,7 +1802,7 @@ function Format-BossAlertDuration {
     "{0}초" -f $seconds
 }
 
-function Get-BossAlertLines {
+function Get-BossAlertItems {
     param([datetime]$Now = (Get-Date))
 
     $beforeSeconds = [int][Math]::Max(0, $script:BossAlertBeforeSeconds)
@@ -1434,34 +1810,68 @@ function Get-BossAlertLines {
     $events = @()
     foreach ($dayOffset in -1..7) {
         $targetDate = $Now.Date.AddDays($dayOffset)
-        foreach ($entry in (Get-BossSchedule)) {
-            $bossName = Get-BossNameForDay $entry $targetDate.DayOfWeek
-            if ([string]::IsNullOrWhiteSpace($bossName)) {
-                continue
-            }
-
+        foreach ($entry in (Get-BossScheduleEventsForDay $targetDate.DayOfWeek)) {
             $parts = $entry.Time.Split(":")
             $eventTime = $targetDate.AddHours([int]$parts[0]).AddMinutes([int]$parts[1])
             $deltaSeconds = [int][Math]::Ceiling(($eventTime - $Now).TotalSeconds)
             if ($deltaSeconds -ge 0 -and $deltaSeconds -le $beforeSeconds) {
                 $events += [pscustomobject]@{
                     Time = $eventTime
-                    Text = "[{0}] 등장 {1} 전" -f $bossName, (Format-BossAlertDuration $deltaSeconds)
+                    Priority = [int]$entry.Priority
+                    Highlight = [bool]$entry.Highlight
+                    Name = [string]$entry.Name
+                    State = "before"
+                    DeltaSeconds = $deltaSeconds
                 }
             }
             elseif ($deltaSeconds -lt 0 -and ([Math]::Abs($deltaSeconds) -le $afterSeconds)) {
                 $events += [pscustomobject]@{
                     Time = $eventTime
-                    Text = "[{0}] 등장 {1} 후" -f $bossName, (Format-BossAlertDuration ([Math]::Abs($deltaSeconds)))
+                    Priority = [int]$entry.Priority
+                    Highlight = [bool]$entry.Highlight
+                    Name = [string]$entry.Name
+                    State = "now"
+                    DeltaSeconds = $deltaSeconds
                 }
             }
         }
     }
 
-    $events |
-        Sort-Object Time |
+    $grouped = @()
+    foreach ($group in ($events | Group-Object { "{0:O}|{1}" -f $_.Time, $_.State })) {
+        $items = @($group.Group | Sort-Object Priority, Name)
+        if ($items.Count -eq 0) {
+            continue
+        }
+
+        $bossNames = @($items | ForEach-Object { $_.Name }) -join " / "
+        $first = $items[0]
+        $text = if ($first.State -eq "before") {
+            "[{0}] 등장 {1} 전" -f $bossNames, (Format-BossAlertDuration ([int]$first.DeltaSeconds))
+        }
+        else {
+            "[{0}] 등장" -f $bossNames
+        }
+        $grouped += [pscustomobject]@{
+            Time = $first.Time
+            Priority = [int]$first.Priority
+            Highlight = [bool](@($items | Where-Object { $_.Highlight }).Count -gt 0)
+            BossParts = @($items | ForEach-Object { [pscustomobject]@{ Name = [string]$_.Name; Highlight = [bool]$_.Highlight } })
+            Key = "{0:O}|{1}|{2}" -f $first.Time, $first.State, (@($items | ForEach-Object { "{0}:{1}" -f $_.Name, ([bool]$_.Highlight) }) -join "/")
+            Text = $text
+        }
+    }
+
+    $grouped |
+        Sort-Object Time, Priority, Text |
         Select-Object -First 2 |
-        ForEach-Object { $_.Text }
+        ForEach-Object { $_ }
+}
+
+function Get-BossAlertLines {
+    param([datetime]$Now = (Get-Date))
+
+    Get-BossAlertItems $Now | ForEach-Object { $_.Text }
 }
 
 function Update-ClockText {
@@ -1495,7 +1905,40 @@ function Update-ClockText {
         }
     }
 
-    if ($script:BossAlertTextBlock) {
+    if ($script:BossAlertPanel) {
+        if (-not $script:BossAlertEnabled) {
+            $script:BossAlertPanel.Children.Clear()
+            $script:BossAlertPanel.Visibility = [System.Windows.Visibility]::Collapsed
+            return
+        }
+
+        $bossAlerts = @(Get-BossAlertItems)
+        if ($bossAlerts.Count -gt 0) {
+            $previousText = @($script:BossAlertPanel.Children | ForEach-Object {
+                if ($_ -is [System.Windows.Controls.Border]) {
+                    $_.Uid
+                }
+            }) -join [Environment]::NewLine
+            $nextText = @($bossAlerts | ForEach-Object { $_.Key }) -join [Environment]::NewLine
+            if ($previousText -ne $nextText) {
+                $script:BossAlertPanel.Children.Clear()
+                foreach ($alert in $bossAlerts) {
+                    $script:BossAlertPanel.Children.Add((New-BossAlertDisplayItem $alert.Text $alert.BossParts $alert.Key)) | Out-Null
+                }
+            }
+            else {
+                for ($i = 0; $i -lt $bossAlerts.Count; $i++) {
+                    Update-BossAlertDisplayItemText $script:BossAlertPanel.Children[$i] $bossAlerts[$i].Text
+                }
+            }
+            $script:BossAlertPanel.Visibility = [System.Windows.Visibility]::Visible
+        }
+        else {
+            $script:BossAlertPanel.Children.Clear()
+            $script:BossAlertPanel.Visibility = [System.Windows.Visibility]::Collapsed
+        }
+    }
+    elseif ($script:BossAlertTextBlock) {
         if (-not $script:BossAlertEnabled) {
             $script:BossAlertTextBlock.Text = ""
             $script:BossAlertTextBlock.Visibility = [System.Windows.Visibility]::Collapsed
@@ -2164,6 +2607,26 @@ function Set-BossTextOutlineColor {
     Save-WidgetConfig
 }
 
+function Set-BossHighlightColor {
+    param([string]$Value)
+
+    if (Set-SettingsDraftValue "BossHighlightColor" $Value) {
+        return
+    }
+
+    $script:BossHighlightColor = $Value
+    if ($script:BossHighlightColorText) {
+        $script:BossHighlightColorText.Text = $script:BossHighlightColor
+    }
+    Set-ColorSwatch $script:BossHighlightColorSwatch $script:BossHighlightColor
+    if ($script:BossAlertPanel) {
+        $script:BossAlertPanel.Children.Clear()
+    }
+    Update-ClockText
+    Update-SettingsPreview
+    Save-WidgetConfig
+}
+
 function Set-BossFontFamily {
     param([string]$Value)
 
@@ -2182,6 +2645,474 @@ function Set-BossFontFamily {
     }
     Update-SettingsPreview
     Save-WidgetConfig
+}
+
+function Get-EditableBossRows {
+    if ($script:SettingsDraft -and $null -ne $script:SettingsDraft.BossRows) {
+        return @(Copy-BossRows $script:SettingsDraft.BossRows)
+    }
+    @(Copy-BossRows $script:BossRows)
+}
+
+function Set-BossRows {
+    param([object]$Rows)
+
+    $nextRows = @(Copy-BossRows $Rows)
+    if (Set-SettingsDraftValue "BossRows" $nextRows) {
+        return
+    }
+
+    $script:BossRows = @($nextRows)
+    Refresh-BossRowsEditor
+    Update-ClockText
+    Update-SettingsPreview
+    Save-WidgetConfig
+}
+
+function Set-BossHighlightAnimationSeconds {
+    param([double]$Value)
+
+    $nextValue = [double][Math]::Max(0.2, [Math]::Min(10.0, $Value))
+    if (Set-SettingsDraftValue "BossHighlightAnimationSeconds" $nextValue) {
+        return
+    }
+
+    $script:BossHighlightAnimationSeconds = $nextValue
+    if ($script:BossHighlightAnimationTextBox) {
+        $script:BossHighlightAnimationTextBox.Text = $script:BossHighlightAnimationSeconds.ToString("0.##", [System.Globalization.CultureInfo]::InvariantCulture)
+    }
+    if ($script:BossAlertPanel) {
+        $script:BossAlertPanel.Children.Clear()
+    }
+    Update-ClockText
+    Update-SettingsPreview
+    Save-WidgetConfig
+}
+
+function Apply-BossHighlightAnimationInput {
+    [double]$seconds = $script:BossHighlightAnimationSeconds
+    if ($script:BossHighlightAnimationTextBox) {
+        [void][double]::TryParse($script:BossHighlightAnimationTextBox.Text, [System.Globalization.NumberStyles]::Float, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$seconds)
+    }
+    Set-BossHighlightAnimationSeconds $seconds
+}
+
+function Get-BossDaysSummary {
+    param([object]$Days)
+
+    $labels = @()
+    foreach ($definition in Get-BossDayDefinitions) {
+        if (@($Days) -contains $definition.Key) {
+            $labels += $definition.Label
+        }
+    }
+    if ($labels.Count -eq 0) {
+        return "미설정"
+    }
+    $labels -join ""
+}
+
+function Get-BossTimesSummary {
+    param([object]$Times)
+
+    $items = @($Times) | ForEach-Object { Normalize-BossTime $_ } | Where-Object { $null -ne $_ } | Sort-Object -Unique
+    if ($items.Count -eq 0) {
+        return "미설정"
+    }
+    $items -join ", "
+}
+
+function Get-BossRowTimesSummary {
+    param([object]$BossRow)
+
+    $parts = @()
+    foreach ($definition in Get-BossDayDefinitions) {
+        if (@($BossRow.Days) -notcontains $definition.Key) {
+            continue
+        }
+
+        $times = @($BossRow.DayTimes.PSObject.Properties[$definition.Key].Value) |
+            ForEach-Object { Normalize-BossTime $_ } |
+            Where-Object { $null -ne $_ } |
+            Sort-Object -Unique
+        if ($times.Count -gt 0) {
+            $parts += ("{0} {1}" -f $definition.Label, ($times -join " / "))
+        }
+    }
+
+    if ($parts.Count -eq 0) {
+        return "미설정"
+    }
+    $parts -join [Environment]::NewLine
+}
+
+function Add-BossRow {
+    $rows = @(Get-EditableBossRows)
+    $rows += [pscustomobject]@{
+        Name = "이벤트 보스"
+        Days = @()
+        Times = @()
+        DayTimes = [pscustomobject]([ordered]@{
+            Mon = @()
+            Tue = @()
+            Wed = @()
+            Thu = @()
+            Fri = @()
+            Sat = @()
+            Sun = @()
+        })
+        Priority = 0
+        Highlight = $false
+        Alert = $true
+    }
+    Set-BossRows $rows
+}
+
+function Remove-BossRow {
+    param([int]$Index)
+
+    $rows = @(Get-EditableBossRows)
+    if ($Index -lt 0 -or $Index -ge $rows.Count) {
+        return
+    }
+
+    $nextRows = @()
+    for ($i = 0; $i -lt $rows.Count; $i++) {
+        if ($i -ne $Index) {
+            $nextRows += $rows[$i]
+        }
+    }
+    Set-BossRows $nextRows
+}
+
+function Update-BossRowName {
+    param(
+        [int]$Index,
+        [string]$Name
+    )
+
+    $rows = @(Get-EditableBossRows)
+    if ($Index -lt 0 -or $Index -ge $rows.Count) {
+        return
+    }
+
+    $rows[$Index].Name = ([string]$Name).Trim()
+    Set-BossRows $rows
+}
+
+function Update-BossRowPriority {
+    param(
+        [int]$Index,
+        [string]$Value
+    )
+
+    $rows = @(Get-EditableBossRows)
+    if ($Index -lt 0 -or $Index -ge $rows.Count) {
+        return
+    }
+
+    [int]$priority = 0
+    [void][int]::TryParse($Value, [ref]$priority)
+    $rows[$Index].Priority = [Math]::Max(0, [Math]::Min(10, $priority))
+    Set-BossRows $rows
+}
+
+function Update-BossRowAlert {
+    param(
+        [int]$Index,
+        [bool]$Value
+    )
+
+    $rows = @(Get-EditableBossRows)
+    if ($Index -lt 0 -or $Index -ge $rows.Count) {
+        return
+    }
+
+    $rows[$Index].Alert = $Value
+    Set-BossRows $rows
+}
+
+function Update-BossRowHighlight {
+    param(
+        [int]$Index,
+        [bool]$Value
+    )
+
+    $rows = @(Get-EditableBossRows)
+    if ($Index -lt 0 -or $Index -ge $rows.Count) {
+        return
+    }
+
+    $rows[$Index].Highlight = $Value
+    Set-BossRows $rows
+}
+
+function Show-BossDaysDialog {
+    param([int]$Index)
+
+    $rows = @(Get-EditableBossRows)
+    if ($Index -lt 0 -or $Index -ge $rows.Count) {
+        return
+    }
+
+    $dialog = New-Object System.Windows.Window
+    $dialog.Title = "요일 설정"
+    $dialog.Width = 280
+    $dialog.Height = 260
+    $dialog.WindowStartupLocation = [System.Windows.WindowStartupLocation]::CenterOwner
+    if ($script:SettingsWindow) { $dialog.Owner = $script:SettingsWindow }
+
+    $panel = New-Object System.Windows.Controls.StackPanel
+    $panel.Margin = New-Object System.Windows.Thickness 14
+    $checks = @{}
+    foreach ($definition in Get-BossDayDefinitions) {
+        $check = New-Object System.Windows.Controls.CheckBox
+        $check.Content = $definition.Label
+        $check.Margin = New-Object System.Windows.Thickness 0, 0, 0, 8
+        $check.IsChecked = (@($rows[$Index].Days) -contains $definition.Key)
+        $checks[$definition.Key] = $check
+        $panel.Children.Add($check) | Out-Null
+    }
+
+    $buttonPanel = New-Object System.Windows.Controls.StackPanel
+    $buttonPanel.Orientation = [System.Windows.Controls.Orientation]::Horizontal
+    $buttonPanel.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Right
+    $okButton = New-Object System.Windows.Controls.Button
+    $okButton.Content = "확인"
+    $okButton.Width = 72
+    $okButton.Margin = New-Object System.Windows.Thickness 0, 8, 8, 0
+    $okButton.Add_Click({
+        $nextDays = @()
+        foreach ($definition in Get-BossDayDefinitions) {
+            if ([bool]$checks[$definition.Key].IsChecked) {
+                $nextDays += $definition.Key
+            }
+        }
+        $rows[$Index].Days = @($nextDays)
+        Set-BossRows $rows
+        $dialog.DialogResult = $true
+        $dialog.Close()
+    }.GetNewClosure())
+    $buttonPanel.Children.Add($okButton) | Out-Null
+    $cancelButton = New-Object System.Windows.Controls.Button
+    $cancelButton.Content = "취소"
+    $cancelButton.Width = 72
+    $cancelButton.Margin = New-Object System.Windows.Thickness 0, 8, 0, 0
+    $cancelButton.Add_Click({ $dialog.Close() }.GetNewClosure())
+    $buttonPanel.Children.Add($cancelButton) | Out-Null
+    $panel.Children.Add($buttonPanel) | Out-Null
+    $dialog.Content = $panel
+    $dialog.ShowDialog() | Out-Null
+}
+
+function Show-BossTimesDialog {
+    param([int]$Index)
+
+    $rows = @(Get-EditableBossRows)
+    if ($Index -lt 0 -or $Index -ge $rows.Count) {
+        return
+    }
+    $selectedDays = @(Get-BossDayDefinitions)
+
+    $dialog = New-Object System.Windows.Window
+    $dialog.Title = "시간 설정"
+    $dialog.Width = 420
+    $dialog.Height = 520
+    $dialog.WindowStartupLocation = [System.Windows.WindowStartupLocation]::CenterOwner
+    if ($script:SettingsWindow) { $dialog.Owner = $script:SettingsWindow }
+
+    $root = New-Object System.Windows.Controls.DockPanel
+    $root.Margin = New-Object System.Windows.Thickness 14
+    $root.LastChildFill = $true
+
+    $dayEditors = @{}
+    $contentPanel = New-Object System.Windows.Controls.StackPanel
+
+    if ($selectedDays.Count -eq 0) {
+        $notice = New-Object System.Windows.Controls.TextBlock
+        $notice.Text = "먼저 요일을 설정해 주세요."
+        $notice.Margin = New-Object System.Windows.Thickness 0, 0, 0, 12
+        $contentPanel.Children.Add($notice) | Out-Null
+    }
+    else {
+        $addTimeBox = {
+            param(
+                [string]$DayKey,
+                [System.Windows.Controls.StackPanel]$TargetPanel,
+                [string]$Value
+            )
+
+            $parts = Split-BossTimeParts $Value
+            $rowPanel = New-Object System.Windows.Controls.StackPanel
+            $rowPanel.Orientation = [System.Windows.Controls.Orientation]::Horizontal
+            $rowPanel.Margin = New-Object System.Windows.Thickness 0, 0, 0, 8
+
+            $hourBox = New-Object System.Windows.Controls.TextBox
+            $hourBox.Width = 44
+            $hourBox.MaxLength = 2
+            $hourBox.Text = $parts.Hour
+            $hourBox.HorizontalContentAlignment = [System.Windows.HorizontalAlignment]::Right
+            $rowPanel.Children.Add($hourBox) | Out-Null
+
+            $hourLabel = New-Object System.Windows.Controls.TextBlock
+            $hourLabel.Text = " 시 "
+            $hourLabel.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+            $rowPanel.Children.Add($hourLabel) | Out-Null
+
+            $minuteBox = New-Object System.Windows.Controls.TextBox
+            $minuteBox.Width = 44
+            $minuteBox.MaxLength = 2
+            $minuteBox.Text = $parts.Minute
+            $minuteBox.HorizontalContentAlignment = [System.Windows.HorizontalAlignment]::Right
+            $rowPanel.Children.Add($minuteBox) | Out-Null
+
+            $minuteLabel = New-Object System.Windows.Controls.TextBlock
+            $minuteLabel.Text = " 분"
+            $minuteLabel.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+            $rowPanel.Children.Add($minuteLabel) | Out-Null
+
+            $entry = [pscustomobject]@{
+                HourBox = $hourBox
+                MinuteBox = $minuteBox
+            }
+
+            $remove = New-Object System.Windows.Controls.Button
+            $remove.Content = "-"
+            $remove.Width = 28
+            $remove.Margin = New-Object System.Windows.Thickness 8, 0, 0, 0
+            $remove.Tag = [pscustomobject]@{
+                Row = $rowPanel
+                Entry = $entry
+                List = $dayEditors[$DayKey]
+                Panel = $TargetPanel
+            }
+            $remove.Add_Click({
+                param($sender, $eventArgs)
+                $sender.Tag.Panel.Children.Remove($sender.Tag.Row) | Out-Null
+                $sender.Tag.List.Remove($sender.Tag.Entry) | Out-Null
+            })
+            $rowPanel.Children.Add($remove) | Out-Null
+
+            $TargetPanel.Children.Add($rowPanel) | Out-Null
+            $dayEditors[$DayKey].Add($entry) | Out-Null
+        }.GetNewClosure()
+
+        foreach ($definition in $selectedDays) {
+            $dayBlock = New-Object System.Windows.Controls.Border
+            $dayBlock.BorderThickness = New-Object System.Windows.Thickness 0, 0, 0, 1
+            $dayBlock.BorderBrush = New-Object System.Windows.Media.SolidColorBrush ([System.Windows.Media.Color]::FromRgb(210, 210, 210))
+            $dayBlock.Margin = New-Object System.Windows.Thickness 0, 0, 0, 12
+            $dayBlock.Padding = New-Object System.Windows.Thickness 0, 0, 0, 10
+
+            $dayPanel = New-Object System.Windows.Controls.StackPanel
+            $title = New-Object System.Windows.Controls.TextBlock
+            $title.Text = "$($definition.Label)요일"
+            $title.FontWeight = [System.Windows.FontWeights]::Bold
+            $title.Margin = New-Object System.Windows.Thickness 0, 0, 0, 8
+            $dayPanel.Children.Add($title) | Out-Null
+
+            $timeListPanel = New-Object System.Windows.Controls.StackPanel
+            $dayEditors[$definition.Key] = New-Object System.Collections.ArrayList
+            foreach ($time in @($rows[$Index].DayTimes.PSObject.Properties[$definition.Key].Value)) {
+                & $addTimeBox $definition.Key $timeListPanel $time
+            }
+            $dayPanel.Children.Add($timeListPanel) | Out-Null
+
+            $addButton = New-Object System.Windows.Controls.Button
+            $addButton.Content = "+"
+            $addButton.Width = 34
+            $addButton.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Left
+            $addButton.Tag = [pscustomobject]@{
+                DayKey = $definition.Key
+                Panel = $timeListPanel
+                AddHandler = $addTimeBox
+            }
+            $addButton.Add_Click({
+                param($sender, $eventArgs)
+                & $sender.Tag.AddHandler $sender.Tag.DayKey $sender.Tag.Panel "12:00"
+            })
+            $dayPanel.Children.Add($addButton) | Out-Null
+
+            $dayBlock.Child = $dayPanel
+            $contentPanel.Children.Add($dayBlock) | Out-Null
+        }
+    }
+
+    $scroll = New-Object System.Windows.Controls.ScrollViewer
+    $scroll.VerticalScrollBarVisibility = [System.Windows.Controls.ScrollBarVisibility]::Auto
+    $scroll.Content = $contentPanel
+
+    $buttonPanel = New-Object System.Windows.Controls.StackPanel
+    $buttonPanel.Orientation = [System.Windows.Controls.Orientation]::Horizontal
+    $buttonPanel.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Right
+    [System.Windows.Controls.DockPanel]::SetDock($buttonPanel, [System.Windows.Controls.Dock]::Bottom)
+    $okButton = New-Object System.Windows.Controls.Button
+    $okButton.Content = "확인"
+    $okButton.Width = 72
+    $okButton.Margin = New-Object System.Windows.Thickness 0, 8, 8, 0
+    $okButton.Add_Click({
+        $nextDayTimes = [ordered]@{}
+        foreach ($definition in Get-BossDayDefinitions) {
+            if ($dayEditors.ContainsKey($definition.Key)) {
+                $times = @()
+                foreach ($entry in @($dayEditors[$definition.Key])) {
+                    $hourText = ([string]$entry.HourBox.Text).Trim()
+                    $minuteText = ([string]$entry.MinuteBox.Text).Trim()
+                    [int]$hour = 0
+                    [int]$minute = 0
+
+                    if ($hourText -notmatch '^\d{1,2}$' -or -not [int]::TryParse($hourText, [ref]$hour) -or $hour -lt 0 -or $hour -gt 23) {
+                        [System.Windows.MessageBox]::Show(
+                            "$($definition.Label)요일의 시는 0부터 23까지 숫자 1~2자리로 입력해 주세요.",
+                            "시간 입력 오류",
+                            [System.Windows.MessageBoxButton]::OK,
+                            [System.Windows.MessageBoxImage]::Warning
+                        ) | Out-Null
+                        $entry.HourBox.Focus() | Out-Null
+                        $entry.HourBox.SelectAll()
+                        return
+                    }
+
+                    if ($minuteText -notmatch '^\d{1,2}$' -or -not [int]::TryParse($minuteText, [ref]$minute) -or $minute -lt 0 -or $minute -gt 59) {
+                        [System.Windows.MessageBox]::Show(
+                            "$($definition.Label)요일의 분은 0부터 59까지 숫자 1~2자리로 입력해 주세요.",
+                            "시간 입력 오류",
+                            [System.Windows.MessageBoxButton]::OK,
+                            [System.Windows.MessageBoxImage]::Warning
+                        ) | Out-Null
+                        $entry.MinuteBox.Focus() | Out-Null
+                        $entry.MinuteBox.SelectAll()
+                        return
+                    }
+
+                    $times += ("{0:00}:{1:00}" -f $hour, $minute)
+                }
+
+                $nextDayTimes[$definition.Key] = @($times | Sort-Object -Unique)
+            }
+            else {
+                $nextDayTimes[$definition.Key] = @($rows[$Index].DayTimes.PSObject.Properties[$definition.Key].Value)
+            }
+        }
+        $rows[$Index].DayTimes = [pscustomobject]$nextDayTimes
+        $rows[$Index].Times = @($nextDayTimes.Values | ForEach-Object { $_ } | Sort-Object -Unique)
+        $rows[$Index].Days = @((Get-BossDayDefinitions) | Where-Object { @($nextDayTimes[$_.Key]).Count -gt 0 } | ForEach-Object { $_.Key })
+        Set-BossRows $rows
+        $dialog.DialogResult = $true
+        $dialog.Close()
+    }.GetNewClosure())
+    $buttonPanel.Children.Add($okButton) | Out-Null
+    $cancelButton = New-Object System.Windows.Controls.Button
+    $cancelButton.Content = "취소"
+    $cancelButton.Width = 72
+    $cancelButton.Margin = New-Object System.Windows.Thickness 0, 8, 0, 0
+    $cancelButton.Add_Click({ $dialog.Close() }.GetNewClosure())
+    $buttonPanel.Children.Add($cancelButton) | Out-Null
+    $root.Children.Add($buttonPanel) | Out-Null
+    $root.Children.Add($scroll) | Out-Null
+
+    $dialog.Content = $root
+    $dialog.ShowDialog() | Out-Null
 }
 
 function Update-SettingsPreview {
@@ -2267,23 +3198,148 @@ function Update-SettingsPreview {
     }
     if ($script:BossPreviewText) {
         if ($script:BossAlertEnabled) {
+            $previewRow = @(Normalize-BossRows $script:BossRows |
+                Where-Object { [bool]$_.Alert -and -not [string]::IsNullOrWhiteSpace($_.Name) } |
+                Sort-Object Priority, Name |
+                Select-Object -First 1)
+            if ($previewRow.Count -gt 0) {
+                $previewName = [string]$previewRow[0].Name
+                $previewHighlighted = [bool]$previewRow[0].Highlight
+            }
+            else {
+                $previewName = "가모스"
+                $previewHighlighted = $false
+            }
+            if ($script:BossPreviewBorder) {
+                $script:BossPreviewBorder.Visibility = [System.Windows.Visibility]::Visible
+                $script:BossPreviewBorder.Margin = New-Object System.Windows.Thickness 0, $script:BossMarginTop, 0, $script:BossMarginBottom
+                if ($script:BossPreviewBorder.Background -is [System.Windows.Media.Brush]) {
+                    $script:BossPreviewBorder.Background.BeginAnimation([System.Windows.Media.Brush]::OpacityProperty, $null)
+                }
+                $script:BossPreviewBorder.Background = [System.Windows.Media.Brushes]::Transparent
+            }
             $script:BossPreviewText.Visibility = [System.Windows.Visibility]::Visible
-            $script:BossPreviewText.Text = "[가모스] 등장 45분 전"
             $script:BossPreviewText.FontFamily = New-Object System.Windows.Media.FontFamily $script:BossFontFamily
             $script:BossPreviewText.FontSize = [double][Math]::Max(10, [Math]::Min(32, $script:BossFontSize))
             $script:BossPreviewText.Foreground = Get-BossTextBrush
-            $script:BossPreviewText.Margin = New-Object System.Windows.Thickness 0, $script:BossMarginTop, 0, $script:BossMarginBottom
+            $script:BossPreviewText.Margin = New-Object System.Windows.Thickness 0
             $script:BossPreviewText.Effect = New-Object System.Windows.Media.Effects.DropShadowEffect -Property @{
                 Color = (ConvertTo-WpfColor $script:BossTextOutlineColor "#000000")
                 BlurRadius = 0
                 ShadowDepth = 1
                 Opacity = (Get-OutlineEffectOpacity $script:BossTextOutlineColorTransparent)
             }
+            $script:BossPreviewText.Inlines.Clear()
+            $script:BossPreviewText.Inlines.Add((New-Object System.Windows.Documents.Run "[")) | Out-Null
+            if ($previewHighlighted) {
+                $nameBorder = New-Object System.Windows.Controls.Border
+                $nameBorder.CornerRadius = New-Object System.Windows.CornerRadius 3
+                $nameBorder.Padding = New-Object System.Windows.Thickness 2, 1, 2, 1
+                $nameBorder.ClipToBounds = $true
+                $nameGrid = New-Object System.Windows.Controls.Grid
+                $fill = New-Object System.Windows.Shapes.Rectangle
+                $fill.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Stretch
+                $fill.VerticalAlignment = [System.Windows.VerticalAlignment]::Stretch
+                $fill.RadiusX = 3
+                $fill.RadiusY = 3
+                $fill.IsHitTestVisible = $false
+                $nameGrid.Children.Add($fill) | Out-Null
+                $nameText = New-Object System.Windows.Controls.TextBlock
+                $nameText.Text = $previewName
+                $nameText.FontWeight = [System.Windows.FontWeights]::Bold
+                $nameText.FontFamily = New-Object System.Windows.Media.FontFamily $script:BossFontFamily
+                $nameText.FontSize = [double][Math]::Max(10, [Math]::Min(32, $script:BossFontSize))
+                $nameText.Foreground = Get-BossTextBrush
+                $nameText.LineHeight = [double]([Math]::Max(10, [Math]::Min(32, $script:BossFontSize)) * 1.2)
+                $nameText.LineStackingStrategy = [System.Windows.LineStackingStrategy]::BlockLineHeight
+                $nameGrid.Children.Add($nameText) | Out-Null
+                $nameBorder.Child = $nameGrid
+                Start-BossHighlightAnimation $nameBorder $fill
+                $script:BossPreviewText.Inlines.Add((New-Object System.Windows.Documents.InlineUIContainer $nameBorder)) | Out-Null
+            }
+            else {
+                $script:BossPreviewText.Inlines.Add((New-Object System.Windows.Documents.Run $previewName)) | Out-Null
+            }
+            $script:BossPreviewText.Inlines.Add((New-Object System.Windows.Documents.Run "] 등장 45분 전")) | Out-Null
         }
         else {
             $script:BossPreviewText.Visibility = [System.Windows.Visibility]::Collapsed
+            if ($script:BossPreviewBorder) {
+                $script:BossPreviewBorder.Visibility = [System.Windows.Visibility]::Collapsed
+            }
         }
     }
+}
+
+function Request-SettingsPreviewUpdate {
+    if (-not $script:ColorPreviewBackground -and -not $script:ColorPreviewText -and -not $script:BossPreviewText -and -not $script:BdoPreviewText) {
+        return
+    }
+
+    Update-SettingsPreview
+    if ($script:SettingsWindow -and $script:SettingsWindow.Dispatcher) {
+        $action = [System.Action]{ Update-SettingsPreview }
+        $script:SettingsWindow.Dispatcher.BeginInvoke($action, [System.Windows.Threading.DispatcherPriority]::Background) | Out-Null
+    }
+}
+
+function Apply-PendingSettingsInputs {
+    if (-not $script:SettingsDraft -or $script:SyncingSettingsControls) {
+        return
+    }
+
+    $bdoOffsetText = if ($script:BdoTimeOffsetTextBox) { [string]$script:BdoTimeOffsetTextBox.Text } else { $null }
+    $bossBeforeMinutesText = if ($script:BossBeforeMinutesTextBox) { [string]$script:BossBeforeMinutesTextBox.Text } else { $null }
+    $bossBeforeSecondsText = if ($script:BossBeforeSecondsTextBox) { [string]$script:BossBeforeSecondsTextBox.Text } else { $null }
+    $bossAfterMinutesText = if ($script:BossAfterMinutesTextBox) { [string]$script:BossAfterMinutesTextBox.Text } else { $null }
+    $bossAfterSecondsText = if ($script:BossAfterSecondsTextBox) { [string]$script:BossAfterSecondsTextBox.Text } else { $null }
+    $bossHighlightAnimationText = if ($script:BossHighlightAnimationTextBox) { [string]$script:BossHighlightAnimationTextBox.Text } else { $null }
+
+    $colorInputs = @(
+        [pscustomobject]@{ Name = "BackgroundColor"; Value = if ($script:BackgroundColorText) { [string]$script:BackgroundColorText.Text } else { $null } },
+        [pscustomobject]@{ Name = "TextColor"; Value = if ($script:TextColorText) { [string]$script:TextColorText.Text } else { $null } },
+        [pscustomobject]@{ Name = "TextOutlineColor"; Value = if ($script:TextOutlineColorText) { [string]$script:TextOutlineColorText.Text } else { $null } },
+        [pscustomobject]@{ Name = "BdoTextColor"; Value = if ($script:BdoTextColorText) { [string]$script:BdoTextColorText.Text } else { $null } },
+        [pscustomobject]@{ Name = "BdoTextOutlineColor"; Value = if ($script:BdoTextOutlineColorText) { [string]$script:BdoTextOutlineColorText.Text } else { $null } },
+        [pscustomobject]@{ Name = "BdoTransitionTextColor"; Value = if ($script:BdoTransitionTextColorText) { [string]$script:BdoTransitionTextColorText.Text } else { $null } },
+        [pscustomobject]@{ Name = "BdoTransitionTextOutlineColor"; Value = if ($script:BdoTransitionTextOutlineColorText) { [string]$script:BdoTransitionTextOutlineColorText.Text } else { $null } },
+        [pscustomobject]@{ Name = "BossTextColor"; Value = if ($script:BossTextColorText) { [string]$script:BossTextColorText.Text } else { $null } },
+        [pscustomobject]@{ Name = "BossTextOutlineColor"; Value = if ($script:BossTextOutlineColorText) { [string]$script:BossTextOutlineColorText.Text } else { $null } },
+        [pscustomobject]@{ Name = "BossHighlightColor"; Value = if ($script:BossHighlightColorText) { [string]$script:BossHighlightColorText.Text } else { $null } }
+    )
+
+    if ($null -ne $bdoOffsetText) {
+        [int]$bdoOffset = $script:BdoTimeOffsetSeconds
+        [void][int]::TryParse($bdoOffsetText, [ref]$bdoOffset)
+        Set-BdoTimeOffsetSeconds $bdoOffset
+    }
+    if ($null -ne $bossBeforeMinutesText -or $null -ne $bossBeforeSecondsText) {
+        [int]$minutes = 0
+        [int]$seconds = 0
+        [void][int]::TryParse($bossBeforeMinutesText, [ref]$minutes)
+        [void][int]::TryParse($bossBeforeSecondsText, [ref]$seconds)
+        Set-BossAlertBeforeSeconds (([Math]::Max(0, $minutes) * 60) + [Math]::Max(0, $seconds))
+    }
+    if ($null -ne $bossAfterMinutesText -or $null -ne $bossAfterSecondsText) {
+        [int]$minutes = 0
+        [int]$seconds = 0
+        [void][int]::TryParse($bossAfterMinutesText, [ref]$minutes)
+        [void][int]::TryParse($bossAfterSecondsText, [ref]$seconds)
+        Set-BossAlertAfterSeconds (([Math]::Max(0, $minutes) * 60) + [Math]::Max(0, $seconds))
+    }
+    if ($null -ne $bossHighlightAnimationText) {
+        [double]$seconds = $script:BossHighlightAnimationSeconds
+        [void][double]::TryParse($bossHighlightAnimationText, [System.Globalization.NumberStyles]::Float, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$seconds)
+        Set-BossHighlightAnimationSeconds $seconds
+    }
+
+    foreach ($item in $colorInputs) {
+        if ($null -ne $item.Value) {
+            Set-ColorSettingByName ([string]$item.Name) ([string]$item.Value)
+        }
+    }
+
+    Request-SettingsPreviewUpdate
 }
 
 function Show-BackgroundColorDialog {
@@ -2411,6 +3467,17 @@ function Show-BossTextOutlineColorDialog {
     }
 }
 
+function Show-BossHighlightColorDialog {
+    $dialog = New-Object System.Windows.Forms.ColorDialog
+    $dialog.AllowFullOpen = $true
+    $dialog.FullOpen = $true
+    $dialog.Color = ConvertTo-DrawingColor (Get-DialogSettingValue "BossHighlightColor" $script:BossHighlightColor) "#FFFFFF"
+
+    if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+        Set-BossHighlightColor (ConvertTo-HexColor $dialog.Color)
+    }
+}
+
 function Show-BossFontDialog {
     $dialog = New-Object System.Windows.Forms.FontDialog
     $dialog.ShowColor = $false
@@ -2474,12 +3541,13 @@ function Sync-TransparentColorControls {
         @("BdoTransitionTextColorTransparent", "BdoTransitionTextColorTransparentCheckBox", "BdoTransitionTextColorSwatch", "BdoTransitionTextColor"),
         @("BdoTransitionTextOutlineColorTransparent", "BdoTransitionTextOutlineColorTransparentCheckBox", "BdoTransitionTextOutlineColorSwatch", "BdoTransitionTextOutlineColor"),
         @("BossTextColorTransparent", "BossTextColorTransparentCheckBox", "BossTextColorSwatch", "BossTextColor"),
-        @("BossTextOutlineColorTransparent", "BossTextOutlineColorTransparentCheckBox", "BossTextOutlineColorSwatch", "BossTextOutlineColor")
+        @("BossTextOutlineColorTransparent", "BossTextOutlineColorTransparentCheckBox", "BossTextOutlineColorSwatch", "BossTextOutlineColor"),
+        @("", "", "BossHighlightColorSwatch", "BossHighlightColor")
     )
 
     foreach ($item in $items) {
-        $transparent = [bool](Get-SettingOrScriptValue $item[0])
-        $checkbox = Get-Variable -Scope Script -Name $item[1] -ValueOnly -ErrorAction SilentlyContinue
+        $transparent = if ([string]::IsNullOrWhiteSpace($item[0])) { $false } else { [bool](Get-SettingOrScriptValue $item[0]) }
+        $checkbox = if ([string]::IsNullOrWhiteSpace($item[1])) { $null } else { Get-Variable -Scope Script -Name $item[1] -ValueOnly -ErrorAction SilentlyContinue }
         if ($checkbox) {
             $checkbox.IsChecked = $transparent
         }
@@ -2765,6 +3833,199 @@ function New-BossAlertTimeInputRow {
     $row
 }
 
+function New-BossValueEditCell {
+    param(
+        [string]$Summary,
+        [int]$Index,
+        [string]$Kind
+    )
+
+    $hasValue = -not [string]::IsNullOrWhiteSpace($Summary) -and $Summary -ne "미설정"
+    if (-not $hasValue) {
+        $button = New-Object System.Windows.Controls.Button
+        $button.Content = "설정하기"
+        $button.Tag = [pscustomobject]@{ Index = $Index; Kind = $Kind }
+        $button.Margin = New-Object System.Windows.Thickness 0, 0, 4, 0
+        $button.Add_Click({
+            param($sender, $eventArgs)
+            if ($sender.Tag.Kind -eq "Days") {
+                Show-BossDaysDialog ([int]$sender.Tag.Index)
+            }
+            else {
+                Show-BossTimesDialog ([int]$sender.Tag.Index)
+            }
+        })
+        return $button
+    }
+
+    $cell = New-Object System.Windows.Controls.Grid
+    $cell.Margin = New-Object System.Windows.Thickness 0, 0, 4, 0
+    $textColumn = New-Object System.Windows.Controls.ColumnDefinition
+    $textColumn.Width = New-Object System.Windows.GridLength 1, ([System.Windows.GridUnitType]::Star)
+    $cell.ColumnDefinitions.Add($textColumn) | Out-Null
+    $buttonColumn = New-Object System.Windows.Controls.ColumnDefinition
+    $buttonColumn.Width = [System.Windows.GridLength]::Auto
+    $cell.ColumnDefinitions.Add($buttonColumn) | Out-Null
+
+    $text = New-Object System.Windows.Controls.TextBlock
+    $text.Text = $Summary
+    $text.ToolTip = $Summary
+    $text.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+    $text.TextWrapping = [System.Windows.TextWrapping]::Wrap
+    [System.Windows.Controls.Grid]::SetColumn($text, 0)
+    $cell.Children.Add($text) | Out-Null
+
+    $button = New-Object System.Windows.Controls.Button
+    $button.Content = "수정"
+    $button.Width = 44
+    $button.Margin = New-Object System.Windows.Thickness 6, 0, 0, 0
+    $button.Tag = [pscustomobject]@{ Index = $Index; Kind = $Kind }
+    $button.Add_Click({
+        param($sender, $eventArgs)
+        if ($sender.Tag.Kind -eq "Days") {
+            Show-BossDaysDialog ([int]$sender.Tag.Index)
+        }
+        else {
+            Show-BossTimesDialog ([int]$sender.Tag.Index)
+        }
+    })
+    [System.Windows.Controls.Grid]::SetColumn($button, 1)
+    $cell.Children.Add($button) | Out-Null
+
+    $cell
+}
+
+function New-BossRowEditorRow {
+    param(
+        [object]$BossRow,
+        [int]$Index
+    )
+
+    $row = New-Object System.Windows.Controls.Grid
+    $row.Margin = New-Object System.Windows.Thickness 0, 0, 0, 6
+
+    foreach ($width in 110, 430, 44, 48, 54, 30) {
+        $column = New-Object System.Windows.Controls.ColumnDefinition
+        $column.Width = New-Object System.Windows.GridLength $width
+        $row.ColumnDefinitions.Add($column) | Out-Null
+    }
+
+    $nameBox = New-Object System.Windows.Controls.TextBox
+    $nameBox.Text = [string]$BossRow.Name
+    $nameBox.Tag = $Index
+    $nameBox.Margin = New-Object System.Windows.Thickness 0, 0, 4, 0
+    $nameBox.Add_LostFocus({
+        param($sender, $eventArgs)
+        Update-BossRowName ([int]$sender.Tag) $sender.Text
+    })
+    $nameBox.Add_KeyDown({
+        param($sender, $eventArgs)
+        if ($eventArgs.Key -eq [System.Windows.Input.Key]::Enter) {
+            Update-BossRowName ([int]$sender.Tag) $sender.Text
+            $eventArgs.Handled = $true
+        }
+    })
+    [System.Windows.Controls.Grid]::SetColumn($nameBox, 0)
+    $row.Children.Add($nameBox) | Out-Null
+
+    $timesCell = New-BossValueEditCell (Get-BossRowTimesSummary $BossRow) $Index "Times"
+    [System.Windows.Controls.Grid]::SetColumn($timesCell, 1)
+    $row.Children.Add($timesCell) | Out-Null
+
+    $priorityBox = New-Object System.Windows.Controls.TextBox
+    $priorityBox.Text = [string]$BossRow.Priority
+    $priorityBox.Tag = $Index
+    $priorityBox.ToolTip = "0이 가장 높고 10이 가장 낮습니다."
+    $priorityBox.HorizontalContentAlignment = [System.Windows.HorizontalAlignment]::Right
+    $priorityBox.Margin = New-Object System.Windows.Thickness 0, 0, 4, 0
+    $priorityBox.Add_LostFocus({
+        param($sender, $eventArgs)
+        Update-BossRowPriority ([int]$sender.Tag) $sender.Text
+    })
+    $priorityBox.Add_KeyDown({
+        param($sender, $eventArgs)
+        if ($eventArgs.Key -eq [System.Windows.Input.Key]::Enter) {
+            Update-BossRowPriority ([int]$sender.Tag) $sender.Text
+            $eventArgs.Handled = $true
+        }
+    })
+    [System.Windows.Controls.Grid]::SetColumn($priorityBox, 2)
+    $row.Children.Add($priorityBox) | Out-Null
+
+    $alertCheck = New-Object System.Windows.Controls.CheckBox
+    $alertCheck.Content = "알림"
+    $alertCheck.Tag = $Index
+    $alertCheck.IsChecked = [bool]$BossRow.Alert
+    $alertCheck.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+    $alertCheck.Add_Click({
+        param($sender, $eventArgs)
+        Update-BossRowAlert ([int]$sender.Tag) ([bool]$sender.IsChecked)
+    })
+    [System.Windows.Controls.Grid]::SetColumn($alertCheck, 3)
+    $row.Children.Add($alertCheck) | Out-Null
+
+    $highlightCheck = New-Object System.Windows.Controls.CheckBox
+    $highlightCheck.Content = "강조"
+    $highlightCheck.Tag = $Index
+    $highlightCheck.IsChecked = [bool]$BossRow.Highlight
+    $highlightCheck.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+    $highlightCheck.Add_Click({
+        param($sender, $eventArgs)
+        Update-BossRowHighlight ([int]$sender.Tag) ([bool]$sender.IsChecked)
+    })
+    [System.Windows.Controls.Grid]::SetColumn($highlightCheck, 4)
+    $row.Children.Add($highlightCheck) | Out-Null
+
+    $removeButton = New-Object System.Windows.Controls.Button
+    $removeButton.Content = "x"
+    $removeButton.Tag = $Index
+    $removeButton.Width = 24
+    $removeButton.Add_Click({ param($sender, $eventArgs) Remove-BossRow ([int]$sender.Tag) })
+    [System.Windows.Controls.Grid]::SetColumn($removeButton, 5)
+    $row.Children.Add($removeButton) | Out-Null
+
+    $row
+}
+
+function Refresh-BossRowsEditor {
+    if (-not $script:BossRowsPanel) {
+        return
+    }
+
+    $script:BossRowsPanel.Children.Clear()
+    $rows = @(Get-EditableBossRows)
+
+    $header = New-Object System.Windows.Controls.Grid
+    $header.Margin = New-Object System.Windows.Thickness 0, 4, 0, 4
+    foreach ($width in 110, 430, 44, 48, 54, 30) {
+        $column = New-Object System.Windows.Controls.ColumnDefinition
+        $column.Width = New-Object System.Windows.GridLength $width
+        $header.ColumnDefinitions.Add($column) | Out-Null
+    }
+    $labels = @("보스", "요일/시간", "우선", "알림", "강조", "")
+    for ($i = 0; $i -lt $labels.Count; $i++) {
+        $label = New-Object System.Windows.Controls.TextBlock
+        $label.Text = $labels[$i]
+        $label.FontSize = 11
+        $label.Opacity = 0.82
+        [System.Windows.Controls.Grid]::SetColumn($label, $i)
+        $header.Children.Add($label) | Out-Null
+    }
+    $script:BossRowsPanel.Children.Add($header) | Out-Null
+
+    for ($i = 0; $i -lt $rows.Count; $i++) {
+        $script:BossRowsPanel.Children.Add((New-BossRowEditorRow $rows[$i] $i)) | Out-Null
+    }
+
+    $addButton = New-Object System.Windows.Controls.Button
+    $addButton.Content = "+"
+    $addButton.Width = 34
+    $addButton.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Left
+    $addButton.Margin = New-Object System.Windows.Thickness 0, 2, 0, 8
+    $addButton.Add_Click({ Add-BossRow })
+    $script:BossRowsPanel.Children.Add($addButton) | Out-Null
+}
+
 function New-SettingsExpander {
     param(
         [string]$Header,
@@ -2975,16 +4236,17 @@ function Show-SettingsWindow {
     $settings = New-Object System.Windows.Window
     $settings.Title = "Clock Widget 설정"
     $workArea = [System.Windows.SystemParameters]::WorkArea
-    $settings.Width = 620
+    $settings.Width = 920
     $settings.Height = [Math]::Min(760, [Math]::Max(520, $workArea.Height - 120))
-    $settings.MinWidth = 470
+    $settings.MinWidth = 760
     $settings.MinHeight = 420
-    $settings.MaxWidth = [Math]::Max(470, $workArea.Width - 40)
+    $settings.MaxWidth = [Math]::Max(760, $workArea.Width - 40)
     $settings.MaxHeight = [Math]::Max(420, $workArea.Height - 40)
     $settings.SizeToContent = [System.Windows.SizeToContent]::Manual
     $settings.ResizeMode = [System.Windows.ResizeMode]::CanResizeWithGrip
     $settings.WindowStartupLocation = [System.Windows.WindowStartupLocation]::CenterScreen
-    $settings.Topmost = $true
+    $settings.Topmost = $false
+    $settings.ShowInTaskbar = $true
     $script:SettingsWindow = $settings
     $script:SettingsOriginal = Get-SettingsSnapshot
     $script:SettingsDraft = Copy-SettingsSnapshot $script:SettingsOriginal
@@ -2998,6 +4260,9 @@ function Show-SettingsWindow {
     $buttonRow = New-Object System.Windows.Controls.RowDefinition
     $buttonRow.Height = [System.Windows.GridLength]::Auto
     $settingsRoot.RowDefinitions.Add($buttonRow) | Out-Null
+    $previewRow = New-Object System.Windows.Controls.RowDefinition
+    $previewRow.Height = [System.Windows.GridLength]::Auto
+    $settingsRoot.RowDefinitions.Add($previewRow) | Out-Null
     $settings.Content = $settingsRoot
 
     $scrollViewer = New-Object System.Windows.Controls.ScrollViewer
@@ -3305,6 +4570,34 @@ function Show-SettingsWindow {
     })
     $script:BossOptionsPanel.Children.Add((New-BossAlertTimeInputRow "표시 종료" $script:BossAfterMinutesTextBox $script:BossAfterSecondsTextBox "후")) | Out-Null
 
+    $script:BossHighlightAnimationTextBox = New-Object System.Windows.Controls.TextBox
+    $script:BossHighlightAnimationTextBox.Width = 64
+    $script:BossHighlightAnimationTextBox.HorizontalContentAlignment = [System.Windows.HorizontalAlignment]::Right
+    $script:BossHighlightAnimationTextBox.Text = $script:BossHighlightAnimationSeconds.ToString("0.##", [System.Globalization.CultureInfo]::InvariantCulture)
+    $script:BossHighlightAnimationTextBox.Add_LostFocus({ Apply-BossHighlightAnimationInput })
+    $script:BossHighlightAnimationTextBox.Add_KeyDown({
+        param($sender, $eventArgs)
+        if ($eventArgs.Key -eq [System.Windows.Input.Key]::Enter) {
+            Apply-BossHighlightAnimationInput
+            $eventArgs.Handled = $true
+        }
+    })
+    $script:BossOptionsPanel.Children.Add((New-SettingsRow "강조 알림 애니메이션 속도" $script:BossHighlightAnimationTextBox)) | Out-Null
+
+    $script:BossHighlightColorText = New-Object System.Windows.Controls.TextBox
+    $script:BossHighlightColorText.Text = $script:BossHighlightColor
+    $script:BossOptionsPanel.Children.Add((New-SettingsRow "강조 알림 표시 색상" (New-ColorValueControl $script:BossHighlightColorText $script:BossHighlightColor "BossHighlightColorSwatch" "BossHighlightColor" { Show-BossHighlightColorDialog }))) | Out-Null
+
+    $bossRowsLabel = New-Object System.Windows.Controls.TextBlock
+    $bossRowsLabel.Text = "보스 행 설정"
+    $bossRowsLabel.Margin = New-Object System.Windows.Thickness 0, 2, 0, 4
+    $script:BossOptionsPanel.Children.Add($bossRowsLabel) | Out-Null
+
+    $script:BossRowsPanel = New-Object System.Windows.Controls.StackPanel
+    $script:BossRowsPanel.Margin = New-Object System.Windows.Thickness 0, 0, 0, 10
+    $script:BossOptionsPanel.Children.Add($script:BossRowsPanel) | Out-Null
+    Refresh-BossRowsEditor
+
     $bossTopMarginLabel = New-Object System.Windows.Controls.TextBlock
     $bossTopMarginLabel.Text = "보스 알림 상단 여백"
     $script:BossOptionsPanel.Children.Add($bossTopMarginLabel) | Out-Null
@@ -3489,16 +4782,21 @@ function Show-SettingsWindow {
     $trayPreviewRow.Children.Add($script:TrayIconPreviewImage) | Out-Null
     $panel.Children.Add($trayPreviewRow) | Out-Null
 
+    $previewHostPanel = New-Object System.Windows.Controls.StackPanel
+    $previewHostPanel.Margin = New-Object System.Windows.Thickness 16, 0, 16, 12
+    [System.Windows.Controls.Grid]::SetRow($previewHostPanel, 2)
+    $settingsRoot.Children.Add($previewHostPanel) | Out-Null
+
     $previewLabel = New-Object System.Windows.Controls.TextBlock
     $previewLabel.Text = "프리뷰"
-    $previewLabel.Margin = New-Object System.Windows.Thickness 0, 8, 0, 4
-    $panel.Children.Add($previewLabel) | Out-Null
+    $previewLabel.Margin = New-Object System.Windows.Thickness 0, 0, 0, 4
+    $previewHostPanel.Children.Add($previewLabel) | Out-Null
 
     $script:ColorPreviewBackground = New-Object System.Windows.Controls.Border
     $script:ColorPreviewBackground.MinHeight = 82
     $script:ColorPreviewBackground.CornerRadius = New-Object System.Windows.CornerRadius 4
     $script:ColorPreviewBackground.Padding = New-Object System.Windows.Thickness 10, 8, 10, 8
-    $script:ColorPreviewBackground.Margin = New-Object System.Windows.Thickness 0, 0, 0, 8
+    $script:ColorPreviewBackground.Margin = New-Object System.Windows.Thickness 0
 
     $previewStack = New-Object System.Windows.Controls.StackPanel
     $previewStack.Orientation = [System.Windows.Controls.Orientation]::Vertical
@@ -3533,13 +4831,19 @@ function Show-SettingsWindow {
     $script:BdoPreviewPanel.Children.Add($script:BdoTransitionPreviewText) | Out-Null
     $previewStack.Children.Add($script:BdoPreviewPanel) | Out-Null
 
+    $script:BossPreviewBorder = New-Object System.Windows.Controls.Border
+    $script:BossPreviewBorder.CornerRadius = New-Object System.Windows.CornerRadius 3
+    $script:BossPreviewBorder.Padding = New-Object System.Windows.Thickness 4, 1, 4, 1
+    $script:BossPreviewBorder.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Center
+
     $script:BossPreviewText = New-Object System.Windows.Controls.TextBlock
     $script:BossPreviewText.Text = "[가모스] 등장 45분 전"
     $script:BossPreviewText.FontWeight = [System.Windows.FontWeights]::Bold
     $script:BossPreviewText.TextAlignment = [System.Windows.TextAlignment]::Center
     $script:BossPreviewText.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Center
     $script:BossPreviewText.LineStackingStrategy = [System.Windows.LineStackingStrategy]::BlockLineHeight
-    $previewStack.Children.Add($script:BossPreviewText) | Out-Null
+    $script:BossPreviewBorder.Child = $script:BossPreviewText
+    $previewStack.Children.Add($script:BossPreviewBorder) | Out-Null
 
     $script:ColorPreviewText = New-Object System.Windows.Controls.TextBlock
     $script:ColorPreviewText.Text = "12:34:56"
@@ -3550,12 +4854,12 @@ function Show-SettingsWindow {
     $script:ColorPreviewText.LineStackingStrategy = [System.Windows.LineStackingStrategy]::BlockLineHeight
     $previewStack.Children.Add($script:ColorPreviewText) | Out-Null
     $script:ColorPreviewBackground.Child = $previewStack
-    $panel.Children.Add($script:ColorPreviewBackground) | Out-Null
+    $previewHostPanel.Children.Add($script:ColorPreviewBackground) | Out-Null
 
     $buttonPanel = New-Object System.Windows.Controls.StackPanel
     $buttonPanel.Orientation = [System.Windows.Controls.Orientation]::Horizontal
     $buttonPanel.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Right
-    $buttonPanel.Margin = New-Object System.Windows.Thickness 16, 8, 16, 16
+    $buttonPanel.Margin = New-Object System.Windows.Thickness 16, 8, 16, 8
 
     $applyButton = New-Object System.Windows.Controls.Button
     $applyButton.Content = "적용"
@@ -3563,7 +4867,10 @@ function Show-SettingsWindow {
     $applyButton.Margin = New-Object System.Windows.Thickness 0, 0, 8, 0
     $applyButton.Add_Click({
         if ($script:SettingsDraft) {
+            Apply-PendingSettingsInputs
             Apply-SettingsSnapshot $script:SettingsDraft $false
+            $script:SettingsDirty = -not (Test-SettingsSnapshotEqual $script:SettingsDraft $script:SettingsOriginal)
+            Request-SettingsPreviewUpdate
         }
     })
     $buttonPanel.Children.Add($applyButton) | Out-Null
@@ -3574,6 +4881,7 @@ function Show-SettingsWindow {
     $okButton.Margin = New-Object System.Windows.Thickness 0, 0, 8, 0
     $okButton.Add_Click({
         if ($script:SettingsDraft) {
+            Apply-PendingSettingsInputs
             Apply-SettingsSnapshot $script:SettingsDraft $true
             $script:SettingsOriginal = Copy-SettingsSnapshot $script:SettingsDraft
             $script:SettingsDirty = $false
@@ -3675,6 +4983,10 @@ function Show-SettingsWindow {
         $script:BossBeforeSecondsTextBox = $null
         $script:BossAfterMinutesTextBox = $null
         $script:BossAfterSecondsTextBox = $null
+        $script:BossHighlightAnimationTextBox = $null
+        $script:BossHighlightColorText = $null
+        $script:BossHighlightColorSwatch = $null
+        $script:BossRowsPanel = $null
         $script:BossMarginTopSlider = $null
         $script:BossMarginTopValueText = $null
         $script:BossMarginBottomSlider = $null
@@ -3711,6 +5023,7 @@ function Show-SettingsWindow {
         $script:BdoPreviewImage = $null
         $script:BdoPreviewText = $null
         $script:BdoTransitionPreviewText = $null
+        $script:BossPreviewBorder = $null
         $script:BossPreviewText = $null
         $script:SettingsOriginal = $null
         $script:SettingsDraft = $null
@@ -3763,6 +5076,9 @@ $script:BossAlertBeforeSeconds = [int]$config.BossAlertBeforeSeconds
 $script:BossAlertAfterSeconds = [int]$config.BossAlertAfterSeconds
 $script:BossMarginTop = [int]$config.BossMarginTop
 $script:BossMarginBottom = [int]$config.BossMarginBottom
+$script:BossHighlightAnimationSeconds = [double]$config.BossHighlightAnimationSeconds
+$script:BossHighlightColor = [string]$config.BossHighlightColor
+$script:BossRows = @(Copy-BossRows $config.BossRows)
 
 $script:Window = New-Object System.Windows.Window
 $script:Window.Title = "Clock Widget"
@@ -3853,16 +5169,14 @@ $script:BdoTimePanel.Children.Add($script:BdoTransitionTextBlock) | Out-Null
 
 $script:ContentStack.Children.Add($script:BdoTimePanel) | Out-Null
 
-$script:BossAlertTextBlock = New-Object System.Windows.Controls.TextBlock
-$script:BossAlertTextBlock.Text = ""
-$script:BossAlertTextBlock.FontWeight = [System.Windows.FontWeights]::Bold
-$script:BossAlertTextBlock.TextAlignment = [System.Windows.TextAlignment]::Center
-$script:BossAlertTextBlock.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Center
-$script:BossAlertTextBlock.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
-$script:BossAlertTextBlock.Margin = New-Object System.Windows.Thickness 2, $script:BossMarginTop, 2, $script:BossMarginBottom
-$script:BossAlertTextBlock.LineStackingStrategy = [System.Windows.LineStackingStrategy]::BlockLineHeight
-$script:BossAlertTextBlock.Visibility = [System.Windows.Visibility]::Collapsed
-$script:ContentStack.Children.Add($script:BossAlertTextBlock) | Out-Null
+$script:BossAlertTextBlock = $null
+$script:BossAlertPanel = New-Object System.Windows.Controls.StackPanel
+$script:BossAlertPanel.Orientation = [System.Windows.Controls.Orientation]::Vertical
+$script:BossAlertPanel.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Center
+$script:BossAlertPanel.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+$script:BossAlertPanel.Margin = New-Object System.Windows.Thickness 2, $script:BossMarginTop, 2, $script:BossMarginBottom
+$script:BossAlertPanel.Visibility = [System.Windows.Visibility]::Collapsed
+$script:ContentStack.Children.Add($script:BossAlertPanel) | Out-Null
 
 $script:ClockTextGrid = New-Object System.Windows.Controls.Grid
 $script:ClockTextGrid.Background = [System.Windows.Media.Brushes]::Transparent
@@ -3924,7 +5238,12 @@ $script:BdoTextGrid.Add_MouseLeftButtonDown($dragHandler)
 $script:BdoTransitionTextBlock.Add_MouseLeftButtonDown($dragHandler)
 $script:ClockTextGrid.Add_MouseLeftButtonDown($dragHandler)
 $script:TextBlock.Add_MouseLeftButtonDown($dragHandler)
-$script:BossAlertTextBlock.Add_MouseLeftButtonDown($dragHandler)
+if ($script:BossAlertTextBlock) {
+    $script:BossAlertTextBlock.Add_MouseLeftButtonDown($dragHandler)
+}
+if ($script:BossAlertPanel) {
+    $script:BossAlertPanel.Add_MouseLeftButtonDown($dragHandler)
+}
 $script:Border.Add_MouseRightButtonUp($rightClickHandler)
 $script:WidgetGrid.Add_MouseRightButtonUp($rightClickHandler)
 $script:BackgroundLayer.Add_MouseRightButtonUp($rightClickHandler)
@@ -3934,7 +5253,12 @@ $script:BdoTextGrid.Add_MouseRightButtonUp($rightClickHandler)
 $script:BdoTransitionTextBlock.Add_MouseRightButtonUp($rightClickHandler)
 $script:ClockTextGrid.Add_MouseRightButtonUp($rightClickHandler)
 $script:TextBlock.Add_MouseRightButtonUp($rightClickHandler)
-$script:BossAlertTextBlock.Add_MouseRightButtonUp($rightClickHandler)
+if ($script:BossAlertTextBlock) {
+    $script:BossAlertTextBlock.Add_MouseRightButtonUp($rightClickHandler)
+}
+if ($script:BossAlertPanel) {
+    $script:BossAlertPanel.Add_MouseRightButtonUp($rightClickHandler)
+}
 
 $script:Window.Add_KeyDown({
     param($sender, $eventArgs)
@@ -3971,53 +5295,3 @@ Create-TrayIcon
 $script:Application = New-Object System.Windows.Application
 $script:Application.ShutdownMode = [System.Windows.ShutdownMode]::OnMainWindowClose
 $script:Application.Run($script:Window) | Out-Null
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
