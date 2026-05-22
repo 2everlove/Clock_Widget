@@ -1,6 +1,6 @@
 ﻿{
-    "X":  1853,
-    "Y":  1321,
+    "X":  1841,
+    "Y":  1312,
     "FontSize":  20,
     "BackgroundOpacity":  1,
     "BackgroundColor":  "#B395FF",
@@ -16,7 +16,7 @@
     "BdoTimeFormat":  "12",
     "BdoIconType":  "blackSpirit",
     "BdoIconEnabled":  true,
-    "BdoFontSize":  16,
+    "BdoFontSize":  14,
     "BdoTimeOffsetSeconds":  0,
     "BdoTextColor":  "#FF66FF",
     "BdoTextColorTransparent":  false,
@@ -41,7 +41,7 @@
     "BossAlertAfterSeconds":  180,
     "BossMarginTop":  0,
     "BossMarginBottom":  0,
-    "BossHighlightAnimationSeconds":  10,
+    "BossHighlightAnimationSeconds":  1,
     "BossHighlightColor":  "#FF00FF",
     "BossRows":  [
 

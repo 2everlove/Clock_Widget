@@ -1347,6 +1347,13 @@ function Apply-BossAlertStyle {
         foreach ($child in @($script:BossAlertPanel.Children)) {
             if ($child -is [System.Windows.Controls.Border] -and $child.Child -is [System.Windows.Controls.TextBlock]) {
                 Apply-BossAlertTextBlockStyle $child.Child $bossFontSize
+                if ($child.Tag -and $child.Tag.WidthTexts) {
+                    $reservedWidth = Get-BossAlertReservedWidth $child.Tag.WidthTexts $child.Tag.BossParts
+                    $child.Width = $reservedWidth
+                    $child.MinWidth = $reservedWidth
+                    $child.Child.Width = $reservedWidth
+                    $child.Child.MinWidth = $reservedWidth
+                }
             }
         }
     }
@@ -1417,11 +1424,58 @@ function Start-BossHighlightAnimation {
     }
 }
 
+function Measure-BossAlertDisplayTextWidth {
+    param(
+        [string]$Text,
+        [object]$BossParts = @()
+    )
+
+    $fontSize = [double][Math]::Max(8, [Math]::Min(48, $script:BossFontSize))
+    $fontFamily = New-Object System.Windows.Media.FontFamily $script:BossFontFamily
+    $typeface = New-Object System.Windows.Media.Typeface $fontFamily, ([System.Windows.FontStyles]::Normal), ([System.Windows.FontWeights]::Bold), ([System.Windows.FontStretches]::Normal)
+    $pixelsPerDip = 1.0
+    if ($script:Window) {
+        try {
+            $pixelsPerDip = [System.Windows.Media.VisualTreeHelper]::GetDpi($script:Window).PixelsPerDip
+        }
+        catch {
+            $pixelsPerDip = 1.0
+        }
+    }
+
+    try {
+        $formatted = New-Object System.Windows.Media.FormattedText $Text, ([System.Globalization.CultureInfo]::CurrentCulture), ([System.Windows.FlowDirection]::LeftToRight), $typeface, $fontSize, ([System.Windows.Media.Brushes]::Black), $pixelsPerDip
+    }
+    catch {
+        $formatted = New-Object System.Windows.Media.FormattedText $Text, ([System.Globalization.CultureInfo]::CurrentCulture), ([System.Windows.FlowDirection]::LeftToRight), $typeface, $fontSize, ([System.Windows.Media.Brushes]::Black)
+    }
+
+    $highlightPadding = @($BossParts | Where-Object { [bool]$_.Highlight }).Count * 4.0
+    [double][Math]::Ceiling($formatted.WidthIncludingTrailingWhitespace + $highlightPadding + 8.0)
+}
+
+function Get-BossAlertReservedWidth {
+    param(
+        [object]$WidthTexts,
+        [object]$BossParts = @()
+    )
+
+    $maxWidth = 0.0
+    foreach ($candidate in @($WidthTexts)) {
+        if ([string]::IsNullOrWhiteSpace([string]$candidate)) {
+            continue
+        }
+        $maxWidth = [Math]::Max($maxWidth, (Measure-BossAlertDisplayTextWidth ([string]$candidate) $BossParts))
+    }
+    [double][Math]::Max(1.0, $maxWidth)
+}
+
 function New-BossAlertDisplayItem {
     param(
         [string]$Text,
         [object]$BossParts = @(),
-        [string]$StableKey = $Text
+        [string]$StableKey = $Text,
+        [object]$WidthTexts = @($Text)
     )
 
     $border = New-Object System.Windows.Controls.Border
@@ -1439,6 +1493,12 @@ function New-BossAlertDisplayItem {
     $textBlock.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
     $textBlock.LineStackingStrategy = [System.Windows.LineStackingStrategy]::BlockLineHeight
     Apply-BossAlertTextBlockStyle $textBlock
+
+    $reservedWidth = Get-BossAlertReservedWidth $WidthTexts $BossParts
+    $border.Width = $reservedWidth
+    $border.MinWidth = $reservedWidth
+    $textBlock.Width = $reservedWidth
+    $textBlock.MinWidth = $reservedWidth
 
     if (@($BossParts).Count -gt 0) {
         $suffix = $Text -replace '^\[[^\]]+\]', ''
@@ -1494,6 +1554,8 @@ function New-BossAlertDisplayItem {
         TextBlock = $textBlock
         SuffixRun = $suffixRun
         HasBossParts = (@($BossParts).Count -gt 0)
+        WidthTexts = @($WidthTexts)
+        BossParts = @($BossParts)
     }
     $border
 }
@@ -1852,6 +1914,20 @@ function Get-BossAlertItems {
         else {
             "[{0}] 등장" -f $bossNames
         }
+        $widthTexts = @($text)
+        if ($first.State -eq "before") {
+            $durationCandidates = @(
+                [int]$first.DeltaSeconds,
+                [int]$beforeSeconds,
+                [int][Math]::Max(0, $beforeSeconds - 1),
+                [int][Math]::Min($beforeSeconds, 3599),
+                [int][Math]::Min($beforeSeconds, 599),
+                [int][Math]::Min($beforeSeconds, 59)
+            ) | Select-Object -Unique
+            $widthTexts = @($durationCandidates | ForEach-Object {
+                "[{0}] 등장 {1} 전" -f $bossNames, (Format-BossAlertDuration ([int]$_))
+            })
+        }
         $grouped += [pscustomobject]@{
             Time = $first.Time
             Priority = [int]$first.Priority
@@ -1859,6 +1935,7 @@ function Get-BossAlertItems {
             BossParts = @($items | ForEach-Object { [pscustomobject]@{ Name = [string]$_.Name; Highlight = [bool]$_.Highlight } })
             Key = "{0:O}|{1}|{2}" -f $first.Time, $first.State, (@($items | ForEach-Object { "{0}:{1}" -f $_.Name, ([bool]$_.Highlight) }) -join "/")
             Text = $text
+            WidthTexts = @($widthTexts)
         }
     }
 
@@ -1923,7 +2000,7 @@ function Update-ClockText {
             if ($previousText -ne $nextText) {
                 $script:BossAlertPanel.Children.Clear()
                 foreach ($alert in $bossAlerts) {
-                    $script:BossAlertPanel.Children.Add((New-BossAlertDisplayItem $alert.Text $alert.BossParts $alert.Key)) | Out-Null
+                    $script:BossAlertPanel.Children.Add((New-BossAlertDisplayItem $alert.Text $alert.BossParts $alert.Key $alert.WidthTexts)) | Out-Null
                 }
             }
             else {
