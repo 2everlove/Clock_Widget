@@ -1270,6 +1270,72 @@ function Get-BdoOutlineThickness {
     [double][Math]::Max(0.75, [Math]::Round($script:BdoFontSize * 0.06, 1))
 }
 
+function New-TextOutlinePath {
+    $path = New-Object System.Windows.Shapes.Path
+    $path.Fill = [System.Windows.Media.Brushes]::Transparent
+    $path.StrokeLineJoin = [System.Windows.Media.PenLineJoin]::Round
+    $path.StrokeStartLineCap = [System.Windows.Media.PenLineCap]::Round
+    $path.StrokeEndLineCap = [System.Windows.Media.PenLineCap]::Round
+    $path.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Center
+    $path.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+    $path.IsHitTestVisible = $false
+    $path.Visibility = [System.Windows.Visibility]::Collapsed
+    $path
+}
+
+function Update-TextOutlinePathGeometry {
+    param(
+        [System.Windows.Shapes.Path]$Path,
+        [string]$Text,
+        [string]$FontFamilyName,
+        [double]$FontSize,
+        [System.Windows.Thickness]$Margin,
+        [double]$StrokeThickness,
+        [System.Windows.Media.Brush]$StrokeBrush,
+        [bool]$Visible
+    )
+
+    if (-not $Path) {
+        return
+    }
+
+    if (-not $Visible -or [string]::IsNullOrEmpty($Text)) {
+        $Path.Visibility = [System.Windows.Visibility]::Collapsed
+        return
+    }
+
+    $fontFamily = New-Object System.Windows.Media.FontFamily $FontFamilyName
+    $typeface = New-Object System.Windows.Media.Typeface $fontFamily, ([System.Windows.FontStyles]::Normal), ([System.Windows.FontWeights]::Bold), ([System.Windows.FontStretches]::Normal)
+    $pixelsPerDip = 1.0
+    if ($script:Window) {
+        try {
+            $pixelsPerDip = [System.Windows.Media.VisualTreeHelper]::GetDpi($script:Window).PixelsPerDip
+        }
+        catch {
+            $pixelsPerDip = 1.0
+        }
+    }
+
+    try {
+        $formatted = New-Object System.Windows.Media.FormattedText $Text, ([System.Globalization.CultureInfo]::CurrentCulture), ([System.Windows.FlowDirection]::LeftToRight), $typeface, $FontSize, ([System.Windows.Media.Brushes]::Black), $pixelsPerDip
+    }
+    catch {
+        $formatted = New-Object System.Windows.Media.FormattedText $Text, ([System.Globalization.CultureInfo]::CurrentCulture), ([System.Windows.FlowDirection]::LeftToRight), $typeface, $FontSize, ([System.Windows.Media.Brushes]::Black)
+    }
+
+    $geometry = $formatted.BuildGeometry((New-Object System.Windows.Point 0, 0))
+    $bounds = $geometry.Bounds
+    $geometry.Transform = New-Object System.Windows.Media.TranslateTransform (-$bounds.X), (-$bounds.Y)
+
+    $Path.Data = $geometry
+    $Path.Width = [double][Math]::Ceiling($bounds.Width)
+    $Path.Height = [double][Math]::Ceiling($bounds.Height)
+    $Path.Margin = $Margin
+    $Path.Stroke = $StrokeBrush
+    $Path.StrokeThickness = $StrokeThickness
+    $Path.Visibility = [System.Windows.Visibility]::Visible
+}
+
 function New-ClockTextBlock {
     param([System.Windows.Media.Brush]$Brush)
 
@@ -1304,6 +1370,23 @@ function New-BdoTextBlock {
     $block
 }
 
+function New-BdoTransitionTextBlock {
+    param([System.Windows.Media.Brush]$Brush)
+
+    $block = New-Object System.Windows.Controls.TextBlock
+    $block.Text = ""
+    $block.FontFamily = New-Object System.Windows.Media.FontFamily $script:BdoTransitionFontFamily
+    $block.FontSize = [double]$script:BdoTransitionFontSize
+    $block.FontWeight = [System.Windows.FontWeights]::Bold
+    $block.Foreground = $Brush
+    $block.Margin = New-Object System.Windows.Thickness 0
+    $block.LineHeight = [double]($script:BdoTransitionFontSize * 1.0)
+    $block.LineStackingStrategy = [System.Windows.LineStackingStrategy]::BlockLineHeight
+    $block.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Center
+    $block.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+    $block
+}
+
 function Apply-ClockTextStyle {
     if (-not $script:TextBlock) {
         return
@@ -1324,7 +1407,12 @@ function Apply-ClockTextStyle {
             $item.Block.Margin = $padding
             $item.Block.Foreground = $outlineBrush
             $item.Block.RenderTransform = New-Object System.Windows.Media.TranslateTransform ($item.X * $outlineThickness), ($item.Y * $outlineThickness)
+            $item.Block.Visibility = if ($script:TextColorTransparent -or $script:TextOutlineColorTransparent) { [System.Windows.Visibility]::Collapsed } else { [System.Windows.Visibility]::Visible }
         }
+    }
+
+    if ($script:TextOutlinePath) {
+        Update-TextOutlinePathGeometry $script:TextOutlinePath $script:TextBlock.Text $script:FontFamily ([double]$script:FontSize) $padding ([double]($outlineThickness * 1.8)) $outlineBrush ([bool]($script:TextColorTransparent -and -not $script:TextOutlineColorTransparent))
     }
 
     $script:TextBlock.FontFamily = $fontFamily
@@ -1332,6 +1420,7 @@ function Apply-ClockTextStyle {
     $script:TextBlock.LineHeight = $lineHeight
     $script:TextBlock.Margin = $padding
     $script:TextBlock.Foreground = $fillBrush
+    $script:TextBlock.Visibility = if ($script:TextColorTransparent) { [System.Windows.Visibility]::Hidden } else { [System.Windows.Visibility]::Visible }
 
     Apply-BossAlertStyle
 }
@@ -1345,14 +1434,29 @@ function Apply-BossAlertStyle {
     if ($script:BossAlertPanel) {
         $script:BossAlertPanel.Margin = New-Object System.Windows.Thickness 2, $script:BossMarginTop, 2, $script:BossMarginBottom
         foreach ($child in @($script:BossAlertPanel.Children)) {
-            if ($child -is [System.Windows.Controls.Border] -and $child.Child -is [System.Windows.Controls.TextBlock]) {
-                Apply-BossAlertTextBlockStyle $child.Child $bossFontSize
+            if ($child -is [System.Windows.Controls.Border] -and $child.Tag -and $child.Tag.TextBlock) {
+                Apply-BossAlertTextBlockStyle $child.Tag.TextBlock $bossFontSize
+                if ($child.Tag.BossNameTextBlocks) {
+                    foreach ($nameText in @($child.Tag.BossNameTextBlocks)) {
+                        $nameText.FontFamily = New-Object System.Windows.Media.FontFamily $script:BossFontFamily
+                        $nameText.FontSize = $bossFontSize
+                        $nameText.Foreground = Get-BossTextBrush
+                        $nameText.LineHeight = [double]($bossFontSize * 1.2)
+                    }
+                }
+                if ($child.Tag.OutlinePath -and $child.Tag.PlainText) {
+                    Update-TextOutlinePathGeometry $child.Tag.OutlinePath ([string]$child.Tag.PlainText) $script:BossFontFamily $bossFontSize (New-Object System.Windows.Thickness 0) ([double]([Math]::Max(0.75, [Math]::Round($bossFontSize * 0.06, 1)) * 1.8)) (Get-BossTextOutlineBrush) ([bool]($script:BossTextColorTransparent -and -not $script:BossTextOutlineColorTransparent))
+                }
                 if ($child.Tag -and $child.Tag.WidthTexts) {
                     $reservedWidth = Get-BossAlertReservedWidth $child.Tag.WidthTexts $child.Tag.BossParts
                     $child.Width = $reservedWidth
                     $child.MinWidth = $reservedWidth
-                    $child.Child.Width = $reservedWidth
-                    $child.Child.MinWidth = $reservedWidth
+                    if ($child.Child) {
+                        $child.Child.Width = $reservedWidth
+                        $child.Child.MinWidth = $reservedWidth
+                    }
+                    $child.Tag.TextBlock.Width = $reservedWidth
+                    $child.Tag.TextBlock.MinWidth = $reservedWidth
                 }
             }
         }
@@ -1373,11 +1477,16 @@ function Apply-BossAlertTextBlockStyle {
     $TextBlock.FontSize = $FontSize
     $TextBlock.LineHeight = [double]($FontSize * 1.32)
     $TextBlock.Foreground = Get-BossTextBrush
-    $TextBlock.Effect = New-Object System.Windows.Media.Effects.DropShadowEffect -Property @{
-        Color = (ConvertTo-WpfColor $script:BossTextOutlineColor "#000000")
-        BlurRadius = 0
-        ShadowDepth = 1
-        Opacity = (Get-OutlineEffectOpacity $script:BossTextOutlineColorTransparent)
+    if ($script:BossTextColorTransparent) {
+        $TextBlock.Effect = $null
+    }
+    else {
+        $TextBlock.Effect = New-Object System.Windows.Media.Effects.DropShadowEffect -Property @{
+            Color = (ConvertTo-WpfColor $script:BossTextOutlineColor "#000000")
+            BlurRadius = 0
+            ShadowDepth = 1
+            Opacity = (Get-OutlineEffectOpacity $script:BossTextOutlineColorTransparent)
+        }
     }
 }
 
@@ -1486,6 +1595,13 @@ function New-BossAlertDisplayItem {
     $border.Uid = $StableKey
     $border.Background = [System.Windows.Media.Brushes]::Transparent
 
+    $itemGrid = New-Object System.Windows.Controls.Grid
+    $itemGrid.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Center
+    $itemGrid.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+
+    $outlinePath = New-TextOutlinePath
+    $itemGrid.Children.Add($outlinePath) | Out-Null
+
     $textBlock = New-Object System.Windows.Controls.TextBlock
     $textBlock.FontWeight = [System.Windows.FontWeights]::Bold
     $textBlock.TextAlignment = [System.Windows.TextAlignment]::Center
@@ -1497,9 +1613,12 @@ function New-BossAlertDisplayItem {
     $reservedWidth = Get-BossAlertReservedWidth $WidthTexts $BossParts
     $border.Width = $reservedWidth
     $border.MinWidth = $reservedWidth
+    $itemGrid.Width = $reservedWidth
+    $itemGrid.MinWidth = $reservedWidth
     $textBlock.Width = $reservedWidth
     $textBlock.MinWidth = $reservedWidth
 
+    $nameTextBlocks = @()
     if (@($BossParts).Count -gt 0) {
         $suffix = $Text -replace '^\[[^\]]+\]', ''
         $textBlock.Inlines.Add((New-Object System.Windows.Documents.Run "[")) | Out-Null
@@ -1533,6 +1652,7 @@ function New-BossAlertDisplayItem {
                 $nameText.LineHeight = [double]([Math]::Max(8, [Math]::Min(48, $script:BossFontSize)) * 1.2)
                 $nameText.LineStackingStrategy = [System.Windows.LineStackingStrategy]::BlockLineHeight
                 $nameGrid.Children.Add($nameText) | Out-Null
+                $nameTextBlocks += $nameText
                 $nameBorder.Child = $nameGrid
                 Start-BossHighlightAnimation $nameBorder $fill
                 $textBlock.Inlines.Add((New-Object System.Windows.Documents.InlineUIContainer $nameBorder)) | Out-Null
@@ -1549,13 +1669,18 @@ function New-BossAlertDisplayItem {
         $suffixRun = $null
     }
 
-    $border.Child = $textBlock
+    $itemGrid.Children.Add($textBlock) | Out-Null
+    $border.Child = $itemGrid
+    Update-TextOutlinePathGeometry $outlinePath $Text $script:BossFontFamily ([double][Math]::Max(8, [Math]::Min(48, $script:BossFontSize))) (New-Object System.Windows.Thickness 0) ([double]([Math]::Max(0.75, [Math]::Round([double]$script:BossFontSize * 0.06, 1)) * 1.8)) (Get-BossTextOutlineBrush) ([bool]($script:BossTextColorTransparent -and -not $script:BossTextOutlineColorTransparent))
     $border.Tag = [pscustomobject]@{
         TextBlock = $textBlock
         SuffixRun = $suffixRun
         HasBossParts = (@($BossParts).Count -gt 0)
         WidthTexts = @($WidthTexts)
         BossParts = @($BossParts)
+        BossNameTextBlocks = @($nameTextBlocks)
+        OutlinePath = $outlinePath
+        PlainText = $Text
     }
     $border
 }
@@ -1577,6 +1702,11 @@ function Update-BossAlertDisplayItemText {
     elseif ($Item.Tag.TextBlock) {
         $Item.Tag.TextBlock.Text = $Text
     }
+    $Item.Tag.PlainText = $Text
+    if ($Item.Tag.OutlinePath) {
+        $bossFontSize = [double][Math]::Max(8, [Math]::Min(48, $script:BossFontSize))
+        Update-TextOutlinePathGeometry $Item.Tag.OutlinePath $Text $script:BossFontFamily $bossFontSize (New-Object System.Windows.Thickness 0) ([double]([Math]::Max(0.75, [Math]::Round($bossFontSize * 0.06, 1)) * 1.8)) (Get-BossTextOutlineBrush) ([bool]($script:BossTextColorTransparent -and -not $script:BossTextOutlineColorTransparent))
+    }
 }
 
 function Apply-BdoTimeStyle {
@@ -1597,32 +1727,64 @@ function Apply-BdoTimeStyle {
             $item.Block.LineHeight = $lineHeight
             $item.Block.Foreground = $outlineBrush
             $item.Block.RenderTransform = New-Object System.Windows.Media.TranslateTransform ($item.X * $outlineThickness), ($item.Y * $outlineThickness)
+            $item.Block.Visibility = if ($script:BdoTextColorTransparent -or $script:BdoTextOutlineColorTransparent) { [System.Windows.Visibility]::Collapsed } else { [System.Windows.Visibility]::Visible }
         }
+    }
+    if ($script:BdoTimeOutlinePath) {
+        Update-TextOutlinePathGeometry $script:BdoTimeOutlinePath $script:BdoTimeTextBlock.Text $script:BdoFontFamily ([double]$script:BdoFontSize) (New-Object System.Windows.Thickness 0) ([double]($outlineThickness * 1.8)) $outlineBrush ([bool]($script:BdoTextColorTransparent -and -not $script:BdoTextOutlineColorTransparent))
     }
 
     $script:BdoTimeTextBlock.FontFamily = $fontFamily
     $script:BdoTimeTextBlock.FontSize = [double]$script:BdoFontSize
     $script:BdoTimeTextBlock.LineHeight = $lineHeight
     $script:BdoTimeTextBlock.Foreground = $fillBrush
+    $script:BdoTimeTextBlock.Visibility = if ($script:BdoTextColorTransparent) { [System.Windows.Visibility]::Hidden } else { [System.Windows.Visibility]::Visible }
     $script:BdoTimePanel.Margin = New-Object System.Windows.Thickness 0, ([Math]::Max(2, [Math]::Round($script:BdoFontSize * 0.10))), 0, -2
 
     if ($script:BdoTransitionTextBlock) {
         $transitionFontSize = [double][Math]::Max(8, [Math]::Min(48, $script:BdoTransitionFontSize))
-        $script:BdoTransitionTextBlock.FontFamily = New-Object System.Windows.Media.FontFamily $script:BdoTransitionFontFamily
-        $script:BdoTransitionTextBlock.FontSize = $transitionFontSize
-        $script:BdoTransitionTextBlock.LineHeight = [double]($transitionFontSize * 1.0)
-        $script:BdoTransitionTextBlock.Foreground = Get-BdoTransitionTextBrush
-        $script:BdoTransitionTextBlock.Margin = New-Object System.Windows.Thickness 6, 0, 0, 0
-        $script:BdoTransitionTextBlock.Effect = New-Object System.Windows.Media.Effects.DropShadowEffect -Property @{
-            Color = (ConvertTo-WpfColor $script:BdoTransitionTextOutlineColor "#000000")
-            BlurRadius = 0
-            ShadowDepth = 1
-            Opacity = (Get-OutlineEffectOpacity $script:BdoTransitionTextOutlineColorTransparent)
+        $transitionFontFamily = New-Object System.Windows.Media.FontFamily $script:BdoTransitionFontFamily
+        $transitionLineHeight = [double]($transitionFontSize * 1.0)
+        $transitionMargin = New-Object System.Windows.Thickness 0
+        $transitionOutlineBrush = Get-BdoTransitionTextOutlineBrush
+        $transitionOutlineThickness = [double][Math]::Max(0.75, [Math]::Round($transitionFontSize * 0.06, 1))
+        if ($script:BdoTransitionOutlineTextBlocks) {
+            foreach ($item in $script:BdoTransitionOutlineTextBlocks) {
+                $item.Block.FontFamily = $transitionFontFamily
+                $item.Block.FontSize = $transitionFontSize
+                $item.Block.LineHeight = $transitionLineHeight
+                $item.Block.Margin = $transitionMargin
+                $item.Block.Foreground = $transitionOutlineBrush
+                $item.Block.RenderTransform = New-Object System.Windows.Media.TranslateTransform ($item.X * $transitionOutlineThickness), ($item.Y * $transitionOutlineThickness)
+                $item.Block.Visibility = if ($script:BdoTransitionTextColorTransparent -or $script:BdoTransitionTextOutlineColorTransparent) { [System.Windows.Visibility]::Collapsed } else { [System.Windows.Visibility]::Visible }
+            }
         }
-        if ($script:BdoTimeEnabled -and $script:BdoTransitionEnabled) {
+        if ($script:BdoTransitionOutlinePath) {
+            Update-TextOutlinePathGeometry $script:BdoTransitionOutlinePath $script:BdoTransitionTextBlock.Text $script:BdoTransitionFontFamily $transitionFontSize $transitionMargin ([double]($transitionOutlineThickness * 1.8)) $transitionOutlineBrush ([bool]($script:BdoTransitionTextColorTransparent -and -not $script:BdoTransitionTextOutlineColorTransparent))
+        }
+        $script:BdoTransitionTextBlock.FontFamily = $transitionFontFamily
+        $script:BdoTransitionTextBlock.FontSize = $transitionFontSize
+        $script:BdoTransitionTextBlock.LineHeight = $transitionLineHeight
+        $script:BdoTransitionTextBlock.Foreground = Get-BdoTransitionTextBrush
+        $script:BdoTransitionTextBlock.Margin = $transitionMargin
+        $script:BdoTransitionTextBlock.Visibility = if ($script:BdoTransitionTextColorTransparent) { [System.Windows.Visibility]::Hidden } else { [System.Windows.Visibility]::Visible }
+        $script:BdoTransitionTextBlock.Effect = $null
+        if ($script:BdoTransitionTextGrid) {
+            $script:BdoTransitionTextGrid.Margin = New-Object System.Windows.Thickness 6, 0, 0, 0
+        }
+        if ($script:BdoTimeEnabled -and $script:BdoTransitionEnabled -and -not ($script:BdoTransitionTextColorTransparent -and $script:BdoTransitionTextOutlineColorTransparent)) {
+            if ($script:BdoTransitionTextGrid) {
+                $script:BdoTransitionTextGrid.Visibility = [System.Windows.Visibility]::Visible
+            }
             $script:BdoTransitionTextBlock.Visibility = [System.Windows.Visibility]::Visible
+            if ($script:BdoTransitionTextColorTransparent) {
+                $script:BdoTransitionTextBlock.Visibility = [System.Windows.Visibility]::Hidden
+            }
         }
         else {
+            if ($script:BdoTransitionTextGrid) {
+                $script:BdoTransitionTextGrid.Visibility = [System.Windows.Visibility]::Collapsed
+            }
             $script:BdoTransitionTextBlock.Visibility = [System.Windows.Visibility]::Collapsed
         }
     }
@@ -1959,6 +2121,9 @@ function Update-ClockText {
                 $item.Block.Text = $text
             }
         }
+        if ($script:TextOutlinePath) {
+            Update-TextOutlinePathGeometry $script:TextOutlinePath $text $script:FontFamily ([double]$script:FontSize) (Get-WidgetPadding $script:FontSize) ([double]((Get-OutlineThickness) * 1.8)) (Get-TextOutlineBrush) ([bool]($script:TextColorTransparent -and -not $script:TextOutlineColorTransparent))
+        }
         $script:TextBlock.Text = $text
     }
 
@@ -1969,16 +2134,44 @@ function Update-ClockText {
                 $item.Block.Text = $bdoText
             }
         }
+        if ($script:BdoTimeOutlinePath) {
+            Update-TextOutlinePathGeometry $script:BdoTimeOutlinePath $bdoText $script:BdoFontFamily ([double]$script:BdoFontSize) (New-Object System.Windows.Thickness 0) ([double]((Get-BdoOutlineThickness) * 1.8)) (Get-BdoTextOutlineBrush) ([bool]($script:BdoTextColorTransparent -and -not $script:BdoTextOutlineColorTransparent))
+        }
         $script:BdoTimeTextBlock.Text = $bdoText
     }
     if ($script:BdoTransitionTextBlock) {
         if ($script:BdoTimeEnabled -and $script:BdoTransitionEnabled) {
-            $script:BdoTransitionTextBlock.Text = Get-BdoTransitionText
-            $script:BdoTransitionTextBlock.Visibility = [System.Windows.Visibility]::Visible
+            $transitionText = Get-BdoTransitionText
+            if ($script:BdoTransitionOutlineTextBlocks) {
+                foreach ($item in $script:BdoTransitionOutlineTextBlocks) {
+                    $item.Block.Text = $transitionText
+                }
+            }
+            if ($script:BdoTransitionOutlinePath) {
+                $transitionFontSize = [double][Math]::Max(8, [Math]::Min(48, $script:BdoTransitionFontSize))
+                $transitionOutlineThickness = [double][Math]::Max(0.75, [Math]::Round($transitionFontSize * 0.06, 1))
+                Update-TextOutlinePathGeometry $script:BdoTransitionOutlinePath $transitionText $script:BdoTransitionFontFamily $transitionFontSize (New-Object System.Windows.Thickness 0) ([double]($transitionOutlineThickness * 1.8)) (Get-BdoTransitionTextOutlineBrush) ([bool]($script:BdoTransitionTextColorTransparent -and -not $script:BdoTransitionTextOutlineColorTransparent))
+            }
+            $script:BdoTransitionTextBlock.Text = $transitionText
+            if ($script:BdoTransitionTextGrid) {
+                $script:BdoTransitionTextGrid.Visibility = if ($script:BdoTransitionTextColorTransparent -and $script:BdoTransitionTextOutlineColorTransparent) { [System.Windows.Visibility]::Collapsed } else { [System.Windows.Visibility]::Visible }
+            }
+            $script:BdoTransitionTextBlock.Visibility = if ($script:BdoTransitionTextColorTransparent) { [System.Windows.Visibility]::Hidden } else { [System.Windows.Visibility]::Visible }
         }
         else {
+            if ($script:BdoTransitionOutlineTextBlocks) {
+                foreach ($item in $script:BdoTransitionOutlineTextBlocks) {
+                    $item.Block.Text = ""
+                }
+            }
+            if ($script:BdoTransitionOutlinePath) {
+                $script:BdoTransitionOutlinePath.Visibility = [System.Windows.Visibility]::Collapsed
+            }
             $script:BdoTransitionTextBlock.Text = ""
             $script:BdoTransitionTextBlock.Visibility = [System.Windows.Visibility]::Collapsed
+            if ($script:BdoTransitionTextGrid) {
+                $script:BdoTransitionTextGrid.Visibility = [System.Windows.Visibility]::Collapsed
+            }
         }
     }
 
@@ -3213,16 +3406,36 @@ function Update-SettingsPreview {
         $script:ColorPreviewBackground.Opacity = 1.0
     }
     if ($script:ColorPreviewText) {
-        $script:ColorPreviewText.Foreground = Get-TextBrush
-        $script:ColorPreviewText.FontFamily = New-Object System.Windows.Media.FontFamily $script:FontFamily
-        $script:ColorPreviewText.Text = $previewTime
-        $script:ColorPreviewText.FontSize = [double][Math]::Max(16, [Math]::Min(42, $script:FontSize))
-        $script:ColorPreviewText.Effect = New-Object System.Windows.Media.Effects.DropShadowEffect -Property @{
-            Color = (ConvertTo-WpfColor $script:TextOutlineColor "#000000")
-            BlurRadius = 0
-            ShadowDepth = 1
-            Opacity = (Get-OutlineEffectOpacity $script:TextOutlineColorTransparent)
+        $previewFontSize = [double][Math]::Max(16, [Math]::Min(42, $script:FontSize))
+        $previewPadding = New-Object System.Windows.Thickness 0
+        $previewLineHeight = [double]($previewFontSize * 1.0)
+        $previewOutlineThickness = [double][Math]::Max(1.0, [Math]::Round($previewFontSize * 0.04, 1))
+        $previewFontFamily = New-Object System.Windows.Media.FontFamily $script:FontFamily
+
+        if ($script:ColorPreviewOutlineTextBlocks) {
+            foreach ($item in $script:ColorPreviewOutlineTextBlocks) {
+                $item.Block.Text = $previewTime
+                $item.Block.FontFamily = $previewFontFamily
+                $item.Block.FontSize = $previewFontSize
+                $item.Block.LineHeight = $previewLineHeight
+                $item.Block.Margin = $previewPadding
+                $item.Block.Foreground = Get-TextOutlineBrush
+                $item.Block.RenderTransform = New-Object System.Windows.Media.TranslateTransform ($item.X * $previewOutlineThickness), ($item.Y * $previewOutlineThickness)
+                $item.Block.Visibility = if ($script:TextColorTransparent -or $script:TextOutlineColorTransparent) { [System.Windows.Visibility]::Collapsed } else { [System.Windows.Visibility]::Visible }
+            }
         }
+        if ($script:ColorPreviewOutlinePath) {
+            Update-TextOutlinePathGeometry $script:ColorPreviewOutlinePath $previewTime $script:FontFamily $previewFontSize $previewPadding ([double]($previewOutlineThickness * 1.8)) (Get-TextOutlineBrush) ([bool]($script:TextColorTransparent -and -not $script:TextOutlineColorTransparent))
+        }
+
+        $script:ColorPreviewText.Foreground = Get-TextBrush
+        $script:ColorPreviewText.FontFamily = $previewFontFamily
+        $script:ColorPreviewText.Text = $previewTime
+        $script:ColorPreviewText.FontSize = $previewFontSize
+        $script:ColorPreviewText.LineHeight = $previewLineHeight
+        $script:ColorPreviewText.Margin = $previewPadding
+        $script:ColorPreviewText.Visibility = if ($script:TextColorTransparent) { [System.Windows.Visibility]::Hidden } else { [System.Windows.Visibility]::Visible }
+        $script:ColorPreviewText.Effect = $null
     }
 
     if ($script:BdoPreviewPanel) {
@@ -3244,112 +3457,99 @@ function Update-SettingsPreview {
         }
     }
     if ($script:BdoPreviewText) {
-        $script:BdoPreviewText.Text = Get-BdoGameTimeText
-        $script:BdoPreviewText.FontFamily = New-Object System.Windows.Media.FontFamily $script:BdoFontFamily
-        $script:BdoPreviewText.FontSize = [double][Math]::Max(10, [Math]::Min(32, $script:BdoFontSize))
-        $script:BdoPreviewText.Foreground = Get-BdoTextBrush
-        $script:BdoPreviewText.Effect = New-Object System.Windows.Media.Effects.DropShadowEffect -Property @{
-            Color = (ConvertTo-WpfColor $script:BdoTextOutlineColor "#000000")
-            BlurRadius = 0
-            ShadowDepth = 1
-            Opacity = (Get-OutlineEffectOpacity $script:BdoTextOutlineColorTransparent)
+        $bdoPreviewText = Get-BdoGameTimeText
+        $bdoPreviewFontSize = [double][Math]::Max(10, [Math]::Min(32, $script:BdoFontSize))
+        $bdoPreviewFontFamily = New-Object System.Windows.Media.FontFamily $script:BdoFontFamily
+        $bdoPreviewLineHeight = [double]($bdoPreviewFontSize * 1.0)
+        $bdoPreviewOutlineThickness = [double][Math]::Max(0.75, [Math]::Round($bdoPreviewFontSize * 0.06, 1))
+        if ($script:BdoPreviewOutlineTextBlocks) {
+            foreach ($item in $script:BdoPreviewOutlineTextBlocks) {
+                $item.Block.Text = $bdoPreviewText
+                $item.Block.FontFamily = $bdoPreviewFontFamily
+                $item.Block.FontSize = $bdoPreviewFontSize
+                $item.Block.LineHeight = $bdoPreviewLineHeight
+                $item.Block.Margin = New-Object System.Windows.Thickness 0
+                $item.Block.Foreground = Get-BdoTextOutlineBrush
+                $item.Block.RenderTransform = New-Object System.Windows.Media.TranslateTransform ($item.X * $bdoPreviewOutlineThickness), ($item.Y * $bdoPreviewOutlineThickness)
+                $item.Block.Visibility = if ($script:BdoTextColorTransparent -or $script:BdoTextOutlineColorTransparent) { [System.Windows.Visibility]::Collapsed } else { [System.Windows.Visibility]::Visible }
+            }
         }
+        if ($script:BdoPreviewOutlinePath) {
+            Update-TextOutlinePathGeometry $script:BdoPreviewOutlinePath $bdoPreviewText $script:BdoFontFamily $bdoPreviewFontSize (New-Object System.Windows.Thickness 0) ([double]($bdoPreviewOutlineThickness * 1.8)) (Get-BdoTextOutlineBrush) ([bool]($script:BdoTextColorTransparent -and -not $script:BdoTextOutlineColorTransparent))
+        }
+        $script:BdoPreviewText.Text = $bdoPreviewText
+        $script:BdoPreviewText.FontFamily = $bdoPreviewFontFamily
+        $script:BdoPreviewText.FontSize = $bdoPreviewFontSize
+        $script:BdoPreviewText.LineHeight = $bdoPreviewLineHeight
+        $script:BdoPreviewText.Foreground = Get-BdoTextBrush
+        $script:BdoPreviewText.Visibility = if ($script:BdoTextColorTransparent) { [System.Windows.Visibility]::Hidden } else { [System.Windows.Visibility]::Visible }
+        $script:BdoPreviewText.Effect = $null
     }
     if ($script:BdoTransitionPreviewText) {
-        if ($script:BdoTimeEnabled -and $script:BdoTransitionEnabled) {
-            $script:BdoTransitionPreviewText.Visibility = [System.Windows.Visibility]::Visible
-            $script:BdoTransitionPreviewText.Text = Get-BdoTransitionText
-            $script:BdoTransitionPreviewText.FontFamily = New-Object System.Windows.Media.FontFamily $script:BdoTransitionFontFamily
-            $script:BdoTransitionPreviewText.FontSize = [double][Math]::Max(9, [Math]::Min(28, $script:BdoTransitionFontSize))
-            $script:BdoTransitionPreviewText.Foreground = Get-BdoTransitionTextBrush
-            $script:BdoTransitionPreviewText.Effect = New-Object System.Windows.Media.Effects.DropShadowEffect -Property @{
-                Color = (ConvertTo-WpfColor $script:BdoTransitionTextOutlineColor "#000000")
-                BlurRadius = 0
-                ShadowDepth = 1
-                Opacity = (Get-OutlineEffectOpacity $script:BdoTransitionTextOutlineColorTransparent)
+        $transitionPreviewText = Get-BdoTransitionText
+        $transitionPreviewFontSize = [double][Math]::Max(9, [Math]::Min(28, $script:BdoTransitionFontSize))
+        $transitionPreviewFontFamily = New-Object System.Windows.Media.FontFamily $script:BdoTransitionFontFamily
+        $transitionPreviewLineHeight = [double]($transitionPreviewFontSize * 1.0)
+        $transitionPreviewOutlineThickness = [double][Math]::Max(0.75, [Math]::Round($transitionPreviewFontSize * 0.06, 1))
+        if ($script:BdoTransitionPreviewOutlineTextBlocks) {
+            foreach ($item in $script:BdoTransitionPreviewOutlineTextBlocks) {
+                $item.Block.Text = $transitionPreviewText
+                $item.Block.FontFamily = $transitionPreviewFontFamily
+                $item.Block.FontSize = $transitionPreviewFontSize
+                $item.Block.LineHeight = $transitionPreviewLineHeight
+                $item.Block.Margin = New-Object System.Windows.Thickness 0
+                $item.Block.Foreground = Get-BdoTransitionTextOutlineBrush
+                $item.Block.RenderTransform = New-Object System.Windows.Media.TranslateTransform ($item.X * $transitionPreviewOutlineThickness), ($item.Y * $transitionPreviewOutlineThickness)
+                $item.Block.Visibility = if ($script:BdoTransitionTextColorTransparent -or $script:BdoTransitionTextOutlineColorTransparent) { [System.Windows.Visibility]::Collapsed } else { [System.Windows.Visibility]::Visible }
             }
+        }
+        if ($script:BdoTransitionPreviewOutlinePath) {
+            Update-TextOutlinePathGeometry $script:BdoTransitionPreviewOutlinePath $transitionPreviewText $script:BdoTransitionFontFamily $transitionPreviewFontSize (New-Object System.Windows.Thickness 0) ([double]($transitionPreviewOutlineThickness * 1.8)) (Get-BdoTransitionTextOutlineBrush) ([bool]($script:BdoTransitionTextColorTransparent -and -not $script:BdoTransitionTextOutlineColorTransparent))
+        }
+        if ($script:BdoTimeEnabled -and $script:BdoTransitionEnabled -and -not ($script:BdoTransitionTextColorTransparent -and $script:BdoTransitionTextOutlineColorTransparent)) {
+            if ($script:BdoTransitionPreviewGrid) {
+                $script:BdoTransitionPreviewGrid.Visibility = [System.Windows.Visibility]::Visible
+            }
+            $script:BdoTransitionPreviewText.Visibility = if ($script:BdoTransitionTextColorTransparent) { [System.Windows.Visibility]::Hidden } else { [System.Windows.Visibility]::Visible }
+            $script:BdoTransitionPreviewText.Text = $transitionPreviewText
+            $script:BdoTransitionPreviewText.FontFamily = $transitionPreviewFontFamily
+            $script:BdoTransitionPreviewText.FontSize = $transitionPreviewFontSize
+            $script:BdoTransitionPreviewText.LineHeight = $transitionPreviewLineHeight
+            $script:BdoTransitionPreviewText.Foreground = Get-BdoTransitionTextBrush
+            $script:BdoTransitionPreviewText.Effect = $null
         }
         else {
             $script:BdoTransitionPreviewText.Visibility = [System.Windows.Visibility]::Collapsed
+            if ($script:BdoTransitionPreviewGrid) {
+                $script:BdoTransitionPreviewGrid.Visibility = [System.Windows.Visibility]::Collapsed
+            }
         }
     }
-    if ($script:BossPreviewText) {
+    if ($script:BossPreviewHostPanel) {
         if ($script:BossAlertEnabled) {
-            $previewRow = @(Normalize-BossRows $script:BossRows |
-                Where-Object { [bool]$_.Alert -and -not [string]::IsNullOrWhiteSpace($_.Name) } |
-                Sort-Object Priority, Name |
-                Select-Object -First 1)
-            if ($previewRow.Count -gt 0) {
-                $previewName = [string]$previewRow[0].Name
-                $previewHighlighted = [bool]$previewRow[0].Highlight
-            }
-            else {
-                $previewName = "가모스"
-                $previewHighlighted = $false
-            }
-            if ($script:BossPreviewBorder) {
-                $script:BossPreviewBorder.Visibility = [System.Windows.Visibility]::Visible
-                $script:BossPreviewBorder.Margin = New-Object System.Windows.Thickness 0, $script:BossMarginTop, 0, $script:BossMarginBottom
-                if ($script:BossPreviewBorder.Background -is [System.Windows.Media.Brush]) {
-                    $script:BossPreviewBorder.Background.BeginAnimation([System.Windows.Media.Brush]::OpacityProperty, $null)
+            $script:BossPreviewHostPanel.Children.Clear()
+            $previewAlerts = @(Get-BossAlertItems)
+            if ($previewAlerts.Count -gt 0) {
+                foreach ($alert in $previewAlerts) {
+                    $previewItem = New-BossAlertDisplayItem $alert.Text $alert.BossParts $alert.Key $alert.WidthTexts
+                    $previewItem.Margin = New-Object System.Windows.Thickness 0, $script:BossMarginTop, 0, $script:BossMarginBottom
+                    $script:BossPreviewHostPanel.Children.Add($previewItem) | Out-Null
                 }
-                $script:BossPreviewBorder.Background = [System.Windows.Media.Brushes]::Transparent
-            }
-            $script:BossPreviewText.Visibility = [System.Windows.Visibility]::Visible
-            $script:BossPreviewText.FontFamily = New-Object System.Windows.Media.FontFamily $script:BossFontFamily
-            $script:BossPreviewText.FontSize = [double][Math]::Max(10, [Math]::Min(32, $script:BossFontSize))
-            $script:BossPreviewText.Foreground = Get-BossTextBrush
-            $script:BossPreviewText.Margin = New-Object System.Windows.Thickness 0
-            $script:BossPreviewText.Effect = New-Object System.Windows.Media.Effects.DropShadowEffect -Property @{
-                Color = (ConvertTo-WpfColor $script:BossTextOutlineColor "#000000")
-                BlurRadius = 0
-                ShadowDepth = 1
-                Opacity = (Get-OutlineEffectOpacity $script:BossTextOutlineColorTransparent)
-            }
-            $script:BossPreviewText.Inlines.Clear()
-            $script:BossPreviewText.Inlines.Add((New-Object System.Windows.Documents.Run "[")) | Out-Null
-            if ($previewHighlighted) {
-                $nameBorder = New-Object System.Windows.Controls.Border
-                $nameBorder.CornerRadius = New-Object System.Windows.CornerRadius 3
-                $nameBorder.Padding = New-Object System.Windows.Thickness 2, 1, 2, 1
-                $nameBorder.ClipToBounds = $true
-                $nameGrid = New-Object System.Windows.Controls.Grid
-                $fill = New-Object System.Windows.Shapes.Rectangle
-                $fill.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Stretch
-                $fill.VerticalAlignment = [System.Windows.VerticalAlignment]::Stretch
-                $fill.RadiusX = 3
-                $fill.RadiusY = 3
-                $fill.IsHitTestVisible = $false
-                $nameGrid.Children.Add($fill) | Out-Null
-                $nameText = New-Object System.Windows.Controls.TextBlock
-                $nameText.Text = $previewName
-                $nameText.FontWeight = [System.Windows.FontWeights]::Bold
-                $nameText.FontFamily = New-Object System.Windows.Media.FontFamily $script:BossFontFamily
-                $nameText.FontSize = [double][Math]::Max(10, [Math]::Min(32, $script:BossFontSize))
-                $nameText.Foreground = Get-BossTextBrush
-                $nameText.LineHeight = [double]([Math]::Max(10, [Math]::Min(32, $script:BossFontSize)) * 1.2)
-                $nameText.LineStackingStrategy = [System.Windows.LineStackingStrategy]::BlockLineHeight
-                $nameGrid.Children.Add($nameText) | Out-Null
-                $nameBorder.Child = $nameGrid
-                Start-BossHighlightAnimation $nameBorder $fill
-                $script:BossPreviewText.Inlines.Add((New-Object System.Windows.Documents.InlineUIContainer $nameBorder)) | Out-Null
+                $script:BossPreviewHostPanel.Visibility = [System.Windows.Visibility]::Visible
             }
             else {
-                $script:BossPreviewText.Inlines.Add((New-Object System.Windows.Documents.Run $previewName)) | Out-Null
+                $script:BossPreviewHostPanel.Visibility = [System.Windows.Visibility]::Collapsed
             }
-            $script:BossPreviewText.Inlines.Add((New-Object System.Windows.Documents.Run "] 등장 45분 전")) | Out-Null
         }
         else {
-            $script:BossPreviewText.Visibility = [System.Windows.Visibility]::Collapsed
-            if ($script:BossPreviewBorder) {
-                $script:BossPreviewBorder.Visibility = [System.Windows.Visibility]::Collapsed
-            }
+            $script:BossPreviewHostPanel.Children.Clear()
+            $script:BossPreviewHostPanel.Visibility = [System.Windows.Visibility]::Collapsed
         }
     }
 }
 
 function Request-SettingsPreviewUpdate {
-    if (-not $script:ColorPreviewBackground -and -not $script:ColorPreviewText -and -not $script:BossPreviewText -and -not $script:BdoPreviewText) {
+    if (-not $script:ColorPreviewBackground -and -not $script:ColorPreviewText -and -not $script:BossPreviewHostPanel -and -not $script:BdoPreviewText) {
         return
     }
 
@@ -4892,35 +5092,123 @@ function Show-SettingsWindow {
     $script:BdoPreviewImage.Margin = New-Object System.Windows.Thickness 0, 0, 4, 0
     $script:BdoPreviewPanel.Children.Add($script:BdoPreviewImage) | Out-Null
 
+    $script:BdoPreviewTextGrid = New-Object System.Windows.Controls.Grid
+    $script:BdoPreviewTextGrid.Background = [System.Windows.Media.Brushes]::Transparent
+    $script:BdoPreviewTextGrid.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Center
+    $script:BdoPreviewTextGrid.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+
+    $script:BdoPreviewOutlineTextBlocks = @()
+    $bdoPreviewOutlineOffsets = @(
+        @(-1, -1), @(0, -1), @(1, -1),
+        @(-1, 0),           @(1, 0),
+        @(-1, 1),  @(0, 1),  @(1, 1)
+    )
+    foreach ($offset in $bdoPreviewOutlineOffsets) {
+        $outlinePreviewText = New-Object System.Windows.Controls.TextBlock
+        $outlinePreviewText.Text = "09:34"
+        $outlinePreviewText.FontWeight = [System.Windows.FontWeights]::Bold
+        $outlinePreviewText.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Center
+        $outlinePreviewText.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+        $outlinePreviewText.LineStackingStrategy = [System.Windows.LineStackingStrategy]::BlockLineHeight
+        $outlinePreviewText.IsHitTestVisible = $false
+        $script:BdoPreviewOutlineTextBlocks += [pscustomobject]@{
+            Block = $outlinePreviewText
+            X = [double]$offset[0]
+            Y = [double]$offset[1]
+        }
+        $script:BdoPreviewTextGrid.Children.Add($outlinePreviewText) | Out-Null
+    }
+
+    $script:BdoPreviewOutlinePath = New-TextOutlinePath
+    $script:BdoPreviewTextGrid.Children.Add($script:BdoPreviewOutlinePath) | Out-Null
+
     $script:BdoPreviewText = New-Object System.Windows.Controls.TextBlock
     $script:BdoPreviewText.Text = "09:34"
     $script:BdoPreviewText.FontWeight = [System.Windows.FontWeights]::Bold
+    $script:BdoPreviewText.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Center
     $script:BdoPreviewText.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
     $script:BdoPreviewText.LineStackingStrategy = [System.Windows.LineStackingStrategy]::BlockLineHeight
-    $script:BdoPreviewPanel.Children.Add($script:BdoPreviewText) | Out-Null
+    $script:BdoPreviewTextGrid.Children.Add($script:BdoPreviewText) | Out-Null
+    $script:BdoPreviewPanel.Children.Add($script:BdoPreviewTextGrid) | Out-Null
+
+    $transitionPreviewOutlineOffsets = @(
+        @(-1, -1), @(0, -1), @(1, -1),
+        @(-1, 0),           @(1, 0),
+        @(-1, 1),  @(0, 1),  @(1, 1)
+    )
+
+    $script:BdoTransitionPreviewGrid = New-Object System.Windows.Controls.Grid
+    $script:BdoTransitionPreviewGrid.Background = [System.Windows.Media.Brushes]::Transparent
+    $script:BdoTransitionPreviewGrid.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Center
+    $script:BdoTransitionPreviewGrid.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+    $script:BdoTransitionPreviewGrid.Margin = New-Object System.Windows.Thickness 6, 0, 0, 0
+
+    $script:BdoTransitionPreviewOutlineTextBlocks = @()
+    foreach ($offset in $transitionPreviewOutlineOffsets) {
+        $outlinePreviewText = New-Object System.Windows.Controls.TextBlock
+        $outlinePreviewText.Text = "(밤까지 12분)"
+        $outlinePreviewText.FontWeight = [System.Windows.FontWeights]::Bold
+        $outlinePreviewText.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Center
+        $outlinePreviewText.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+        $outlinePreviewText.LineStackingStrategy = [System.Windows.LineStackingStrategy]::BlockLineHeight
+        $outlinePreviewText.IsHitTestVisible = $false
+        $script:BdoTransitionPreviewOutlineTextBlocks += [pscustomobject]@{
+            Block = $outlinePreviewText
+            X = [double]$offset[0]
+            Y = [double]$offset[1]
+        }
+        $script:BdoTransitionPreviewGrid.Children.Add($outlinePreviewText) | Out-Null
+    }
+
+    $script:BdoTransitionPreviewOutlinePath = New-TextOutlinePath
+    $script:BdoTransitionPreviewGrid.Children.Add($script:BdoTransitionPreviewOutlinePath) | Out-Null
 
     $script:BdoTransitionPreviewText = New-Object System.Windows.Controls.TextBlock
     $script:BdoTransitionPreviewText.Text = "(밤까지 12분)"
     $script:BdoTransitionPreviewText.FontWeight = [System.Windows.FontWeights]::Bold
     $script:BdoTransitionPreviewText.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
-    $script:BdoTransitionPreviewText.Margin = New-Object System.Windows.Thickness 6, 0, 0, 0
+    $script:BdoTransitionPreviewText.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Center
     $script:BdoTransitionPreviewText.LineStackingStrategy = [System.Windows.LineStackingStrategy]::BlockLineHeight
-    $script:BdoPreviewPanel.Children.Add($script:BdoTransitionPreviewText) | Out-Null
+    $script:BdoTransitionPreviewGrid.Children.Add($script:BdoTransitionPreviewText) | Out-Null
+    $script:BdoPreviewPanel.Children.Add($script:BdoTransitionPreviewGrid) | Out-Null
     $previewStack.Children.Add($script:BdoPreviewPanel) | Out-Null
 
-    $script:BossPreviewBorder = New-Object System.Windows.Controls.Border
-    $script:BossPreviewBorder.CornerRadius = New-Object System.Windows.CornerRadius 3
-    $script:BossPreviewBorder.Padding = New-Object System.Windows.Thickness 4, 1, 4, 1
-    $script:BossPreviewBorder.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Center
+    $script:BossPreviewHostPanel = New-Object System.Windows.Controls.StackPanel
+    $script:BossPreviewHostPanel.Orientation = [System.Windows.Controls.Orientation]::Vertical
+    $script:BossPreviewHostPanel.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Center
+    $script:BossPreviewHostPanel.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+    $previewStack.Children.Add($script:BossPreviewHostPanel) | Out-Null
 
-    $script:BossPreviewText = New-Object System.Windows.Controls.TextBlock
-    $script:BossPreviewText.Text = "[가모스] 등장 45분 전"
-    $script:BossPreviewText.FontWeight = [System.Windows.FontWeights]::Bold
-    $script:BossPreviewText.TextAlignment = [System.Windows.TextAlignment]::Center
-    $script:BossPreviewText.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Center
-    $script:BossPreviewText.LineStackingStrategy = [System.Windows.LineStackingStrategy]::BlockLineHeight
-    $script:BossPreviewBorder.Child = $script:BossPreviewText
-    $previewStack.Children.Add($script:BossPreviewBorder) | Out-Null
+    $colorPreviewTextGrid = New-Object System.Windows.Controls.Grid
+    $colorPreviewTextGrid.Background = [System.Windows.Media.Brushes]::Transparent
+    $colorPreviewTextGrid.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Center
+    $colorPreviewTextGrid.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+
+    $script:ColorPreviewOutlineTextBlocks = @()
+    $previewOutlineOffsets = @(
+        @(-1, -1), @(0, -1), @(1, -1),
+        @(-1, 0),           @(1, 0),
+        @(-1, 1),  @(0, 1),  @(1, 1)
+    )
+    foreach ($offset in $previewOutlineOffsets) {
+        $outlinePreviewText = New-Object System.Windows.Controls.TextBlock
+        $outlinePreviewText.Text = "12:34:56"
+        $outlinePreviewText.FontSize = 22
+        $outlinePreviewText.FontWeight = [System.Windows.FontWeights]::Bold
+        $outlinePreviewText.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Center
+        $outlinePreviewText.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+        $outlinePreviewText.LineStackingStrategy = [System.Windows.LineStackingStrategy]::BlockLineHeight
+        $outlinePreviewText.IsHitTestVisible = $false
+        $script:ColorPreviewOutlineTextBlocks += [pscustomobject]@{
+            Block = $outlinePreviewText
+            X = [double]$offset[0]
+            Y = [double]$offset[1]
+        }
+        $colorPreviewTextGrid.Children.Add($outlinePreviewText) | Out-Null
+    }
+
+    $script:ColorPreviewOutlinePath = New-TextOutlinePath
+    $colorPreviewTextGrid.Children.Add($script:ColorPreviewOutlinePath) | Out-Null
 
     $script:ColorPreviewText = New-Object System.Windows.Controls.TextBlock
     $script:ColorPreviewText.Text = "12:34:56"
@@ -4929,7 +5217,8 @@ function Show-SettingsWindow {
     $script:ColorPreviewText.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Center
     $script:ColorPreviewText.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
     $script:ColorPreviewText.LineStackingStrategy = [System.Windows.LineStackingStrategy]::BlockLineHeight
-    $previewStack.Children.Add($script:ColorPreviewText) | Out-Null
+    $colorPreviewTextGrid.Children.Add($script:ColorPreviewText) | Out-Null
+    $previewStack.Children.Add($colorPreviewTextGrid) | Out-Null
     $script:ColorPreviewBackground.Child = $previewStack
     $previewHostPanel.Children.Add($script:ColorPreviewBackground) | Out-Null
 
@@ -5095,13 +5384,20 @@ function Show-SettingsWindow {
         $script:TrayIconPathText = $null
         $script:TrayIconPreviewImage = $null
         $script:ColorPreviewBackground = $null
+        $script:ColorPreviewOutlineTextBlocks = $null
+        $script:ColorPreviewOutlinePath = $null
         $script:ColorPreviewText = $null
         $script:BdoPreviewPanel = $null
         $script:BdoPreviewImage = $null
+        $script:BdoPreviewTextGrid = $null
+        $script:BdoPreviewOutlineTextBlocks = $null
+        $script:BdoPreviewOutlinePath = $null
         $script:BdoPreviewText = $null
+        $script:BdoTransitionPreviewGrid = $null
+        $script:BdoTransitionPreviewOutlineTextBlocks = $null
+        $script:BdoTransitionPreviewOutlinePath = $null
         $script:BdoTransitionPreviewText = $null
-        $script:BossPreviewBorder = $null
-        $script:BossPreviewText = $null
+        $script:BossPreviewHostPanel = $null
         $script:SettingsOriginal = $null
         $script:SettingsDraft = $null
         $script:SettingsDirty = $false
@@ -5232,17 +5528,42 @@ foreach ($offset in $bdoOutlineOffsets) {
     $script:BdoTextGrid.Children.Add($outlineBlock) | Out-Null
 }
 
+$script:BdoTimeOutlinePath = New-TextOutlinePath
+$script:BdoTextGrid.Children.Add($script:BdoTimeOutlinePath) | Out-Null
+
 $script:BdoTimeTextBlock = New-BdoTextBlock (Get-BdoTextBrush)
 $script:BdoTextGrid.Children.Add($script:BdoTimeTextBlock) | Out-Null
 
-$script:BdoTransitionTextBlock = New-Object System.Windows.Controls.TextBlock
-$script:BdoTransitionTextBlock.Text = ""
-$script:BdoTransitionTextBlock.FontWeight = [System.Windows.FontWeights]::Bold
-$script:BdoTransitionTextBlock.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
-$script:BdoTransitionTextBlock.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Center
-$script:BdoTransitionTextBlock.LineStackingStrategy = [System.Windows.LineStackingStrategy]::BlockLineHeight
-$script:BdoTransitionTextBlock.Visibility = [System.Windows.Visibility]::Collapsed
-$script:BdoTimePanel.Children.Add($script:BdoTransitionTextBlock) | Out-Null
+$script:BdoTransitionTextGrid = New-Object System.Windows.Controls.Grid
+$script:BdoTransitionTextGrid.Background = [System.Windows.Media.Brushes]::Transparent
+$script:BdoTransitionTextGrid.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Center
+$script:BdoTransitionTextGrid.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+$script:BdoTransitionTextGrid.Visibility = [System.Windows.Visibility]::Collapsed
+$script:BdoTimePanel.Children.Add($script:BdoTransitionTextGrid) | Out-Null
+
+$script:BdoTransitionOutlineTextBlocks = @()
+$bdoTransitionOutlineOffsets = @(
+    @(-1, -1), @(0, -1), @(1, -1),
+    @(-1, 0),           @(1, 0),
+    @(-1, 1),  @(0, 1),  @(1, 1)
+)
+foreach ($offset in $bdoTransitionOutlineOffsets) {
+    $outlineBlock = New-BdoTransitionTextBlock (Get-BdoTransitionTextOutlineBrush)
+    $outlineBlock.IsHitTestVisible = $false
+    $entry = [pscustomobject]@{
+        Block = $outlineBlock
+        X = [double]$offset[0]
+        Y = [double]$offset[1]
+    }
+    $script:BdoTransitionOutlineTextBlocks += $entry
+    $script:BdoTransitionTextGrid.Children.Add($outlineBlock) | Out-Null
+}
+
+$script:BdoTransitionOutlinePath = New-TextOutlinePath
+$script:BdoTransitionTextGrid.Children.Add($script:BdoTransitionOutlinePath) | Out-Null
+
+$script:BdoTransitionTextBlock = New-BdoTransitionTextBlock (Get-BdoTransitionTextBrush)
+$script:BdoTransitionTextGrid.Children.Add($script:BdoTransitionTextBlock) | Out-Null
 
 $script:ContentStack.Children.Add($script:BdoTimePanel) | Out-Null
 
@@ -5276,6 +5597,9 @@ foreach ($offset in $outlineOffsets) {
     $script:OutlineTextBlocks += $entry
     $script:ClockTextGrid.Children.Add($outlineBlock) | Out-Null
 }
+
+$script:TextOutlinePath = New-TextOutlinePath
+$script:ClockTextGrid.Children.Add($script:TextOutlinePath) | Out-Null
 
 $script:TextBlock = New-ClockTextBlock (Get-TextBrush)
 $script:ClockTextGrid.Children.Add($script:TextBlock) | Out-Null
@@ -5312,6 +5636,7 @@ $script:BackgroundLayer.Add_MouseLeftButtonDown($dragHandler)
 $script:ContentStack.Add_MouseLeftButtonDown($dragHandler)
 $script:BdoTimePanel.Add_MouseLeftButtonDown($dragHandler)
 $script:BdoTextGrid.Add_MouseLeftButtonDown($dragHandler)
+$script:BdoTransitionTextGrid.Add_MouseLeftButtonDown($dragHandler)
 $script:BdoTransitionTextBlock.Add_MouseLeftButtonDown($dragHandler)
 $script:ClockTextGrid.Add_MouseLeftButtonDown($dragHandler)
 $script:TextBlock.Add_MouseLeftButtonDown($dragHandler)
@@ -5327,6 +5652,7 @@ $script:BackgroundLayer.Add_MouseRightButtonUp($rightClickHandler)
 $script:ContentStack.Add_MouseRightButtonUp($rightClickHandler)
 $script:BdoTimePanel.Add_MouseRightButtonUp($rightClickHandler)
 $script:BdoTextGrid.Add_MouseRightButtonUp($rightClickHandler)
+$script:BdoTransitionTextGrid.Add_MouseRightButtonUp($rightClickHandler)
 $script:BdoTransitionTextBlock.Add_MouseRightButtonUp($rightClickHandler)
 $script:ClockTextGrid.Add_MouseRightButtonUp($rightClickHandler)
 $script:TextBlock.Add_MouseRightButtonUp($rightClickHandler)
