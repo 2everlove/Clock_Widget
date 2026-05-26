@@ -12,6 +12,7 @@ public static class NativeWindowTools {
     public const int GWL_EXSTYLE = -20;
     public const long WS_EX_TOOLWINDOW = 0x00000080L;
     public const long WS_EX_APPWINDOW = 0x00040000L;
+    public const long WS_EX_TRANSPARENT = 0x00000020L;
 
     [DllImport("user32.dll", EntryPoint = "GetWindowLong")]
     private static extern int GetWindowLong32(IntPtr hWnd, int nIndex);
@@ -54,6 +55,7 @@ $script:BdoPapuIconPath = Join-Path $script:AppDir "bdo_papu_variant.png"
 $script:StartupPath = Join-Path ([Environment]::GetFolderPath("Startup")) "$($script:AppName).vbs"
 $script:PowerShellPath = Join-Path $env:WINDIR "System32\WindowsPowerShell\v1.0\powershell.exe"
 $script:SettingsWindow = $null
+$script:WidgetMoveMode = $false
 
 function Get-DefaultConfig {
     [pscustomobject]@{
@@ -62,6 +64,10 @@ function Get-DefaultConfig {
         FontSize = 34
         BackgroundOpacity = 0.86
         BackgroundColor = "#111111"
+        BackgroundBorderColor = "#000000"
+        BackgroundBorderColorTransparent = $true
+        BackgroundBorderThickness = 2
+        BackgroundBorderRadius = 0
         TextColor = "#FFFFFF"
         TextColorTransparent = $false
         TextOutlineColor = "#000000"
@@ -114,7 +120,7 @@ function Read-WidgetConfig {
         $config = Get-Content -LiteralPath $script:ConfigPath -Raw | ConvertFrom-Json
         $default = Get-DefaultConfig
 
-        foreach ($name in "X", "Y", "FontSize", "BackgroundColor", "TextColor", "TextColorTransparent", "TextOutlineColor", "TextOutlineColorTransparent", "FontFamily", "TrayIconPath", "TimeFormat", "MeridiemLanguage", "BdoTimeEnabled", "BdoTimeFormat", "BdoIconType", "BdoIconEnabled", "BdoFontSize", "BdoTimeOffsetSeconds", "BdoTextColor", "BdoTextColorTransparent", "BdoTextOutlineColor", "BdoTextOutlineColorTransparent", "BdoFontFamily", "BdoTransitionEnabled", "BdoTransitionFontSize", "BdoTransitionTextColor", "BdoTransitionTextColorTransparent", "BdoTransitionTextOutlineColor", "BdoTransitionTextOutlineColorTransparent", "BdoTransitionFontFamily", "BossAlertEnabled", "BossFontSize", "BossTextColor", "BossTextColorTransparent", "BossTextOutlineColor", "BossTextOutlineColorTransparent", "BossFontFamily", "BossAlertBeforeSeconds", "BossAlertAfterSeconds", "BossMarginTop", "BossMarginBottom", "BossHighlightAnimationSeconds", "BossHighlightColor", "BossRows") {
+        foreach ($name in "X", "Y", "FontSize", "BackgroundColor", "BackgroundBorderColor", "BackgroundBorderColorTransparent", "BackgroundBorderThickness", "BackgroundBorderRadius", "TextColor", "TextColorTransparent", "TextOutlineColor", "TextOutlineColorTransparent", "FontFamily", "TrayIconPath", "TimeFormat", "MeridiemLanguage", "BdoTimeEnabled", "BdoTimeFormat", "BdoIconType", "BdoIconEnabled", "BdoFontSize", "BdoTimeOffsetSeconds", "BdoTextColor", "BdoTextColorTransparent", "BdoTextOutlineColor", "BdoTextOutlineColorTransparent", "BdoFontFamily", "BdoTransitionEnabled", "BdoTransitionFontSize", "BdoTransitionTextColor", "BdoTransitionTextColorTransparent", "BdoTransitionTextOutlineColor", "BdoTransitionTextOutlineColorTransparent", "BdoTransitionFontFamily", "BossAlertEnabled", "BossFontSize", "BossTextColor", "BossTextColorTransparent", "BossTextOutlineColor", "BossTextOutlineColorTransparent", "BossFontFamily", "BossAlertBeforeSeconds", "BossAlertAfterSeconds", "BossMarginTop", "BossMarginBottom", "BossHighlightAnimationSeconds", "BossHighlightColor", "BossRows") {
             if ($null -eq $config.$name) {
                 $config | Add-Member -NotePropertyName $name -NotePropertyValue $default.$name
             }
@@ -278,6 +284,10 @@ function Save-WidgetConfig {
         FontSize = [int]$script:FontSize
         BackgroundOpacity = [double]$script:BackgroundOpacity
         BackgroundColor = [string]$script:BackgroundColor
+        BackgroundBorderColor = [string]$script:BackgroundBorderColor
+        BackgroundBorderColorTransparent = [bool]$script:BackgroundBorderColorTransparent
+        BackgroundBorderThickness = [int]$script:BackgroundBorderThickness
+        BackgroundBorderRadius = [int]$script:BackgroundBorderRadius
         TextColor = [string]$script:TextColor
         TextColorTransparent = [bool]$script:TextColorTransparent
         TextOutlineColor = [string]$script:TextOutlineColor
@@ -323,7 +333,7 @@ function Save-WidgetConfig {
 
 function Get-SettingsPropertyNames {
     @(
-        "FontSize", "BackgroundOpacity", "BackgroundColor", "TextColor", "TextColorTransparent",
+        "FontSize", "BackgroundOpacity", "BackgroundColor", "BackgroundBorderColor", "BackgroundBorderColorTransparent", "BackgroundBorderThickness", "BackgroundBorderRadius", "TextColor", "TextColorTransparent",
         "TextOutlineColor", "TextOutlineColorTransparent", "FontFamily",
         "TrayIconPath", "TimeFormat", "MeridiemLanguage",
         "BdoTimeEnabled", "BdoTimeFormat", "BdoIconType", "BdoIconEnabled", "BdoFontSize", "BdoTimeOffsetSeconds",
@@ -342,6 +352,10 @@ function Get-SettingsSnapshot {
         FontSize = [int]$script:FontSize
         BackgroundOpacity = [double]$script:BackgroundOpacity
         BackgroundColor = [string]$script:BackgroundColor
+        BackgroundBorderColor = [string]$script:BackgroundBorderColor
+        BackgroundBorderColorTransparent = [bool]$script:BackgroundBorderColorTransparent
+        BackgroundBorderThickness = [int]$script:BackgroundBorderThickness
+        BackgroundBorderRadius = [int]$script:BackgroundBorderRadius
         TextColor = [string]$script:TextColor
         TextColorTransparent = [bool]$script:TextColorTransparent
         TextOutlineColor = [string]$script:TextOutlineColor
@@ -426,6 +440,10 @@ function Set-SettingsVariables {
     $script:FontSize = [int]$Snapshot.FontSize
     $script:BackgroundOpacity = [double]$Snapshot.BackgroundOpacity
     $script:BackgroundColor = [string]$Snapshot.BackgroundColor
+    $script:BackgroundBorderColor = [string]$Snapshot.BackgroundBorderColor
+    $script:BackgroundBorderColorTransparent = [bool]$Snapshot.BackgroundBorderColorTransparent
+    $script:BackgroundBorderThickness = [int]$Snapshot.BackgroundBorderThickness
+    $script:BackgroundBorderRadius = [int]$Snapshot.BackgroundBorderRadius
     $script:TextColor = [string]$Snapshot.TextColor
     $script:TextColorTransparent = [bool]$Snapshot.TextColorTransparent
     $script:TextOutlineColor = [string]$Snapshot.TextOutlineColor
@@ -498,6 +516,7 @@ function Apply-SettingsSnapshot {
         $script:BackgroundLayer.Fill = Get-BackgroundBrush $script:BackgroundOpacity
         $script:BackgroundLayer.Opacity = $script:BackgroundOpacity
     }
+    Apply-BackgroundBorderStyle
     Update-BdoLogo
     Apply-ClockTextStyle
     Apply-BdoTimeStyle
@@ -613,8 +632,14 @@ function Sync-SettingsControlsFromDraft {
         if ($script:FontSizeSlider) { $script:FontSizeSlider.Value = [double]$draft.FontSize }
         if ($script:FontSizeValueText) { $script:FontSizeValueText.Text = [string]$draft.FontSize }
         if ($script:BackgroundOpacityValueText) { $script:BackgroundOpacityValueText.Text = [string]([int][Math]::Round([double]$draft.BackgroundOpacity * 100)) }
+        if ($script:BackgroundBorderThicknessSlider) { $script:BackgroundBorderThicknessSlider.Value = [double]$draft.BackgroundBorderThickness }
+        if ($script:BackgroundBorderThicknessValueText) { $script:BackgroundBorderThicknessValueText.Text = [string]([int]$draft.BackgroundBorderThickness) }
+        if ($script:BackgroundBorderRadiusSlider) { $script:BackgroundBorderRadiusSlider.Value = [double]$draft.BackgroundBorderRadius }
+        if ($script:BackgroundBorderRadiusValueText) { $script:BackgroundBorderRadiusValueText.Text = [string]([int]$draft.BackgroundBorderRadius) }
         if ($script:BackgroundColorText) { $script:BackgroundColorText.Text = [string]$draft.BackgroundColor }
         Set-ColorSwatch $script:BackgroundColorSwatch $draft.BackgroundColor
+        if ($script:BackgroundBorderColorText) { $script:BackgroundBorderColorText.Text = [string]$draft.BackgroundBorderColor }
+        Set-ColorSwatch $script:BackgroundBorderColorSwatch $draft.BackgroundBorderColor ([bool]$draft.BackgroundBorderColorTransparent)
         if ($script:TextColorText) { $script:TextColorText.Text = [string]$draft.TextColor }
         Set-ColorSwatch $script:TextColorSwatch $draft.TextColor
         if ($script:TextOutlineColorText) { $script:TextOutlineColorText.Text = [string]$draft.TextOutlineColor }
@@ -669,6 +694,80 @@ function Hide-WindowFromAltTab {
     $style = [NativeWindowTools]::GetWindowLongPtr($handle, [NativeWindowTools]::GWL_EXSTYLE).ToInt64()
     $style = ($style -bor [NativeWindowTools]::WS_EX_TOOLWINDOW) -band (-bnot [NativeWindowTools]::WS_EX_APPWINDOW)
     [NativeWindowTools]::SetWindowLongPtr($handle, [NativeWindowTools]::GWL_EXSTYLE, (New-Object IntPtr $style)) | Out-Null
+}
+
+function Set-WidgetClickThrough {
+    param([bool]$Enabled)
+
+    if ($null -eq $script:Window) {
+        return
+    }
+
+    $helper = New-Object System.Windows.Interop.WindowInteropHelper $script:Window
+    $handle = $helper.Handle
+    if ($handle -eq [IntPtr]::Zero) {
+        return
+    }
+
+    $style = [NativeWindowTools]::GetWindowLongPtr($handle, [NativeWindowTools]::GWL_EXSTYLE).ToInt64()
+    if ($Enabled) {
+        $style = $style -bor [NativeWindowTools]::WS_EX_TRANSPARENT
+    }
+    else {
+        $style = $style -band (-bnot [NativeWindowTools]::WS_EX_TRANSPARENT)
+    }
+    [NativeWindowTools]::SetWindowLongPtr($handle, [NativeWindowTools]::GWL_EXSTYLE, (New-Object IntPtr $style)) | Out-Null
+}
+
+function Set-WidgetMoveMode {
+    param([bool]$Enabled)
+
+    $script:WidgetMoveMode = $Enabled
+    Set-WidgetClickThrough (-not $Enabled)
+
+    $moveCursor = if ($Enabled) { [System.Windows.Input.Cursors]::SizeAll } else { $null }
+    if ($script:Window) {
+        $script:Window.Cursor = $moveCursor
+    }
+    if ($script:Border) {
+        $script:Border.Cursor = $moveCursor
+    }
+    if ($script:WidgetGrid) {
+        $script:WidgetGrid.Cursor = $moveCursor
+    }
+    if ($script:BackgroundLayer) {
+        $script:BackgroundLayer.Cursor = $moveCursor
+    }
+    if ($script:ContentStack) {
+        $script:ContentStack.Cursor = $moveCursor
+    }
+    if ($script:MoveModeFixButton) {
+        $script:MoveModeFixButton.Visibility = if ($Enabled) { [System.Windows.Visibility]::Visible } else { [System.Windows.Visibility]::Collapsed }
+        $script:MoveModeFixButton.IsHitTestVisible = $Enabled
+        $script:MoveModeFixButton.Cursor = [System.Windows.Input.Cursors]::Hand
+    }
+    Apply-BackgroundBorderStyle
+    if ($script:ContentStack) {
+        $script:ContentStack.Opacity = if ($Enabled) { 0.45 } else { 1.0 }
+        if ($Enabled) {
+            $blur = New-Object System.Windows.Media.Effects.BlurEffect
+            $blur.Radius = 1.5
+            $script:ContentStack.Effect = $blur
+        }
+        else {
+            $script:ContentStack.Effect = $null
+        }
+    }
+    if ($script:BackgroundLayer) {
+        $script:BackgroundLayer.Opacity = if ($Enabled) { [Math]::Min([double]$script:BackgroundOpacity, 0.35) } else { [double]$script:BackgroundOpacity }
+    }
+}
+
+function Start-WidgetMoveMode {
+    if (-not $script:Window.IsVisible) {
+        Set-WidgetVisible $true
+    }
+    Set-WidgetMoveMode $true
 }
 
 function Get-WidgetWindowBoundsSize {
@@ -747,8 +846,10 @@ function Set-WidgetVisible {
         $script:Window.Show()
         $script:Window.Activate()
         Hide-WindowFromAltTab
+        Set-WidgetClickThrough (-not $script:WidgetMoveMode)
     }
     else {
+        Set-WidgetMoveMode $false
         Save-WidgetConfig
         $script:Window.Hide()
     }
@@ -768,6 +869,9 @@ function Create-TrayIcon {
 
     $script:TrayToggleItem = $script:TrayMenu.Items.Add("위젯 숨기기")
     $script:TrayToggleItem.Add_Click({ Toggle-WidgetVisible })
+
+    $moveItem = $script:TrayMenu.Items.Add("이동")
+    $moveItem.Add_Click({ Start-WidgetMoveMode })
 
     $script:TrayMenu.Items.Add("-") | Out-Null
 
@@ -1166,6 +1270,7 @@ function Set-ColorSettingByName {
     $nextValue = Normalize-HexColorInput $Value $fallback
     switch ($Name) {
         "BackgroundColor" { Set-BackgroundColor $nextValue }
+        "BackgroundBorderColor" { Set-BackgroundBorderColor $nextValue }
         "TextColor" { Set-TextColor $nextValue }
         "TextOutlineColor" { Set-TextOutlineColor $nextValue }
         "BdoTextColor" { Set-BdoTextColor $nextValue }
@@ -1222,6 +1327,55 @@ function Get-PreviewBackgroundBrush {
     $alpha = [byte][Math]::Max(0, [Math]::Min(255, [Math]::Round($Opacity * 255)))
     $color = [System.Windows.Media.Color]::FromArgb($alpha, $baseColor.R, $baseColor.G, $baseColor.B)
     New-Object System.Windows.Media.SolidColorBrush $color
+}
+
+function Get-BackgroundBorderBrush {
+    New-ColorBrushOrTransparent $script:BackgroundBorderColor "#000000" $script:BackgroundBorderColorTransparent
+}
+
+function Get-BackgroundBorderThickness {
+    if ($script:BackgroundBorderColorTransparent) {
+        return (New-Object System.Windows.Thickness 0)
+    }
+
+    $thickness = [double][Math]::Max(0, [Math]::Min(10, [int]$script:BackgroundBorderThickness))
+    New-Object System.Windows.Thickness $thickness
+}
+
+function Get-BackgroundCornerRadiusValue {
+    [double][Math]::Max(0, [Math]::Min(30, [int]$script:BackgroundBorderRadius))
+}
+
+function Get-BackgroundCornerRadius {
+    New-Object System.Windows.CornerRadius (Get-BackgroundCornerRadiusValue)
+}
+
+function Apply-BackgroundCornerRadius {
+    $radius = Get-BackgroundCornerRadiusValue
+    if ($script:Border) {
+        $script:Border.CornerRadius = New-Object System.Windows.CornerRadius $radius
+    }
+    if ($script:BackgroundLayer) {
+        $script:BackgroundLayer.RadiusX = $radius
+        $script:BackgroundLayer.RadiusY = $radius
+    }
+}
+
+function Apply-BackgroundBorderStyle {
+    if (-not $script:Border) {
+        return
+    }
+
+    Apply-BackgroundCornerRadius
+
+    if ($script:WidgetMoveMode) {
+        $script:Border.BorderBrush = [System.Windows.Media.Brushes]::Black
+        $script:Border.BorderThickness = New-Object System.Windows.Thickness 2
+        return
+    }
+
+    $script:Border.BorderBrush = Get-BackgroundBorderBrush
+    $script:Border.BorderThickness = Get-BackgroundBorderThickness
 }
 
 function Get-TextBrush {
@@ -2284,6 +2438,63 @@ function Set-BackgroundColor {
     Save-WidgetConfig
 }
 
+function Set-BackgroundBorderColor {
+    param([string]$Value)
+
+    if (Set-SettingsDraftValue "BackgroundBorderColor" $Value) {
+        return
+    }
+
+    $script:BackgroundBorderColor = $Value
+    Apply-BackgroundBorderStyle
+    if ($script:BackgroundBorderColorText) {
+        $script:BackgroundBorderColorText.Text = $script:BackgroundBorderColor
+    }
+    Set-ColorSwatch $script:BackgroundBorderColorSwatch $script:BackgroundBorderColor $script:BackgroundBorderColorTransparent
+    Update-SettingsPreview
+    Save-WidgetConfig
+}
+
+function Set-BackgroundBorderThickness {
+    param([int]$Value)
+
+    $nextValue = [Math]::Max(0, [Math]::Min(10, $Value))
+    if (Set-SettingsDraftValue "BackgroundBorderThickness" $nextValue) {
+        return
+    }
+
+    $script:BackgroundBorderThickness = $nextValue
+    Apply-BackgroundBorderStyle
+    if ($script:BackgroundBorderThicknessSlider) {
+        $script:BackgroundBorderThicknessSlider.Value = [double]$script:BackgroundBorderThickness
+    }
+    if ($script:BackgroundBorderThicknessValueText) {
+        $script:BackgroundBorderThicknessValueText.Text = [string]$script:BackgroundBorderThickness
+    }
+    Update-SettingsPreview
+    Save-WidgetConfig
+}
+
+function Set-BackgroundBorderRadius {
+    param([int]$Value)
+
+    $nextValue = [Math]::Max(0, [Math]::Min(30, $Value))
+    if (Set-SettingsDraftValue "BackgroundBorderRadius" $nextValue) {
+        return
+    }
+
+    $script:BackgroundBorderRadius = $nextValue
+    Apply-BackgroundCornerRadius
+    if ($script:BackgroundBorderRadiusSlider) {
+        $script:BackgroundBorderRadiusSlider.Value = [double]$script:BackgroundBorderRadius
+    }
+    if ($script:BackgroundBorderRadiusValueText) {
+        $script:BackgroundBorderRadiusValueText.Text = [string]$script:BackgroundBorderRadius
+    }
+    Update-SettingsPreview
+    Save-WidgetConfig
+}
+
 function Set-TextColor {
     param([string]$Value)
 
@@ -2334,6 +2545,9 @@ function Set-ColorTransparency {
     switch ($Name) {
         { $_ -in @("TextColorTransparent", "TextOutlineColorTransparent") } {
             Apply-ClockTextStyle
+        }
+        "BackgroundBorderColorTransparent" {
+            Apply-BackgroundBorderStyle
         }
         { $_ -in @("BdoTextColorTransparent", "BdoTextOutlineColorTransparent", "BdoTransitionTextColorTransparent", "BdoTransitionTextOutlineColorTransparent") } {
             Apply-BdoTimeStyle
@@ -3403,6 +3617,9 @@ function Update-SettingsPreview {
 
     if ($script:ColorPreviewBackground) {
         $script:ColorPreviewBackground.Background = Get-PreviewBackgroundBrush $script:BackgroundOpacity
+        $script:ColorPreviewBackground.BorderBrush = Get-BackgroundBorderBrush
+        $script:ColorPreviewBackground.BorderThickness = Get-BackgroundBorderThickness
+        $script:ColorPreviewBackground.CornerRadius = Get-BackgroundCornerRadius
         $script:ColorPreviewBackground.Opacity = 1.0
     }
     if ($script:ColorPreviewText) {
@@ -3574,6 +3791,7 @@ function Apply-PendingSettingsInputs {
 
     $colorInputs = @(
         [pscustomobject]@{ Name = "BackgroundColor"; Value = if ($script:BackgroundColorText) { [string]$script:BackgroundColorText.Text } else { $null } },
+        [pscustomobject]@{ Name = "BackgroundBorderColor"; Value = if ($script:BackgroundBorderColorText) { [string]$script:BackgroundBorderColorText.Text } else { $null } },
         [pscustomobject]@{ Name = "TextColor"; Value = if ($script:TextColorText) { [string]$script:TextColorText.Text } else { $null } },
         [pscustomobject]@{ Name = "TextOutlineColor"; Value = if ($script:TextOutlineColorText) { [string]$script:TextOutlineColorText.Text } else { $null } },
         [pscustomobject]@{ Name = "BdoTextColor"; Value = if ($script:BdoTextColorText) { [string]$script:BdoTextColorText.Text } else { $null } },
@@ -3627,6 +3845,17 @@ function Show-BackgroundColorDialog {
 
     if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
         Set-BackgroundColor (ConvertTo-HexColor $dialog.Color)
+    }
+}
+
+function Show-BackgroundBorderColorDialog {
+    $dialog = New-Object System.Windows.Forms.ColorDialog
+    $dialog.AllowFullOpen = $true
+    $dialog.FullOpen = $true
+    $dialog.Color = ConvertTo-DrawingColor (Get-DialogSettingValue "BackgroundBorderColor" $script:BackgroundBorderColor) "#000000"
+
+    if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+        Set-BackgroundBorderColor (ConvertTo-HexColor $dialog.Color)
     }
 }
 
@@ -3811,6 +4040,7 @@ function Get-SettingOrScriptValue {
 
 function Sync-TransparentColorControls {
     $items = @(
+        @("BackgroundBorderColorTransparent", "BackgroundBorderColorTransparentCheckBox", "BackgroundBorderColorSwatch", "BackgroundBorderColor"),
         @("TextColorTransparent", "TextColorTransparentCheckBox", "TextColorSwatch", "TextColor"),
         @("TextOutlineColorTransparent", "TextOutlineColorTransparentCheckBox", "TextOutlineColorSwatch", "TextOutlineColor"),
         @("BdoTextColorTransparent", "BdoTextColorTransparentCheckBox", "BdoTextColorSwatch", "BdoTextColor"),
@@ -5022,9 +5252,49 @@ function Show-SettingsWindow {
     $script:BackgroundOpacityValueText.Text = [string]([int][Math]::Round($script:BackgroundOpacity * 100))
     $panel.Children.Add((New-SliderRow $opacitySlider $script:BackgroundOpacityValueText)) | Out-Null
 
+    $borderThicknessLabel = New-Object System.Windows.Controls.TextBlock
+    $borderThicknessLabel.Text = "배경 테두리 굵기"
+    $panel.Children.Add($borderThicknessLabel) | Out-Null
+
+    $script:BackgroundBorderThicknessSlider = New-Object System.Windows.Controls.Slider
+    $script:BackgroundBorderThicknessSlider.Minimum = 0
+    $script:BackgroundBorderThicknessSlider.Maximum = 10
+    $script:BackgroundBorderThicknessSlider.Value = [double]$script:BackgroundBorderThickness
+    $script:BackgroundBorderThicknessSlider.TickFrequency = 1
+    $script:BackgroundBorderThicknessSlider.IsSnapToTickEnabled = $true
+    $script:BackgroundBorderThicknessSlider.Add_ValueChanged({
+        param($sender, $eventArgs)
+        Set-BackgroundBorderThickness ([int]$sender.Value)
+    })
+    $script:BackgroundBorderThicknessValueText = New-Object System.Windows.Controls.TextBlock
+    $script:BackgroundBorderThicknessValueText.Text = [string]$script:BackgroundBorderThickness
+    $panel.Children.Add((New-SliderRow $script:BackgroundBorderThicknessSlider $script:BackgroundBorderThicknessValueText)) | Out-Null
+
+    $borderRadiusLabel = New-Object System.Windows.Controls.TextBlock
+    $borderRadiusLabel.Text = "배경 모서리 반경"
+    $panel.Children.Add($borderRadiusLabel) | Out-Null
+
+    $script:BackgroundBorderRadiusSlider = New-Object System.Windows.Controls.Slider
+    $script:BackgroundBorderRadiusSlider.Minimum = 0
+    $script:BackgroundBorderRadiusSlider.Maximum = 30
+    $script:BackgroundBorderRadiusSlider.Value = [double]$script:BackgroundBorderRadius
+    $script:BackgroundBorderRadiusSlider.TickFrequency = 1
+    $script:BackgroundBorderRadiusSlider.IsSnapToTickEnabled = $true
+    $script:BackgroundBorderRadiusSlider.Add_ValueChanged({
+        param($sender, $eventArgs)
+        Set-BackgroundBorderRadius ([int]$sender.Value)
+    })
+    $script:BackgroundBorderRadiusValueText = New-Object System.Windows.Controls.TextBlock
+    $script:BackgroundBorderRadiusValueText.Text = [string]$script:BackgroundBorderRadius
+    $panel.Children.Add((New-SliderRow $script:BackgroundBorderRadiusSlider $script:BackgroundBorderRadiusValueText)) | Out-Null
+
     $script:BackgroundColorText = New-Object System.Windows.Controls.TextBox
     $script:BackgroundColorText.Text = $script:BackgroundColor
     $panel.Children.Add((New-SettingsRow "배경 색상" (New-ColorValueControl $script:BackgroundColorText $script:BackgroundColor "BackgroundColorSwatch" "BackgroundColor" { Show-BackgroundColorDialog }))) | Out-Null
+
+    $script:BackgroundBorderColorText = New-Object System.Windows.Controls.TextBox
+    $script:BackgroundBorderColorText.Text = $script:BackgroundBorderColor
+    $panel.Children.Add((New-SettingsRow "배경 테두리색" (New-ColorValueControl $script:BackgroundBorderColorText $script:BackgroundBorderColor "BackgroundBorderColorSwatch" "BackgroundBorderColor" { Show-BackgroundBorderColorDialog } "BackgroundBorderColorTransparent" "BackgroundBorderColorTransparentCheckBox"))) | Out-Null
 
     $script:TextColorText = New-Object System.Windows.Controls.TextBox
     $script:TextColorText.Text = $script:TextColor
@@ -5071,7 +5341,7 @@ function Show-SettingsWindow {
 
     $script:ColorPreviewBackground = New-Object System.Windows.Controls.Border
     $script:ColorPreviewBackground.MinHeight = 82
-    $script:ColorPreviewBackground.CornerRadius = New-Object System.Windows.CornerRadius 4
+    $script:ColorPreviewBackground.CornerRadius = Get-BackgroundCornerRadius
     $script:ColorPreviewBackground.Padding = New-Object System.Windows.Thickness 10, 8, 10, 8
     $script:ColorPreviewBackground.Margin = New-Object System.Windows.Thickness 0
 
@@ -5374,6 +5644,13 @@ function Show-SettingsWindow {
         $script:BackgroundOpacityValueText = $null
         $script:BackgroundColorText = $null
         $script:BackgroundColorSwatch = $null
+        $script:BackgroundBorderColorText = $null
+        $script:BackgroundBorderColorSwatch = $null
+        $script:BackgroundBorderColorTransparentCheckBox = $null
+        $script:BackgroundBorderThicknessSlider = $null
+        $script:BackgroundBorderThicknessValueText = $null
+        $script:BackgroundBorderRadiusSlider = $null
+        $script:BackgroundBorderRadiusValueText = $null
         $script:TextColorText = $null
         $script:TextColorSwatch = $null
         $script:TextColorTransparentCheckBox = $null
@@ -5412,6 +5689,10 @@ $config = Read-WidgetConfig
 $script:FontSize = [int]$config.FontSize
 $script:BackgroundOpacity = [double]$config.BackgroundOpacity
 $script:BackgroundColor = [string]$config.BackgroundColor
+$script:BackgroundBorderColor = [string]$config.BackgroundBorderColor
+$script:BackgroundBorderColorTransparent = [bool]$config.BackgroundBorderColorTransparent
+$script:BackgroundBorderThickness = [int]$config.BackgroundBorderThickness
+$script:BackgroundBorderRadius = [int]$config.BackgroundBorderRadius
 $script:TextColor = [string]$config.TextColor
 $script:TextColorTransparent = [bool]$config.TextColorTransparent
 $script:TextOutlineColor = [string]$config.TextOutlineColor
@@ -5464,7 +5745,10 @@ $script:Window.ResizeMode = [System.Windows.ResizeMode]::NoResize
 $script:Window.SizeToContent = [System.Windows.SizeToContent]::WidthAndHeight
 $script:Window.Left = [double]$config.X
 $script:Window.Top = [double]$config.Y
-$script:Window.Add_SourceInitialized({ Hide-WindowFromAltTab })
+$script:Window.Add_SourceInitialized({
+    Hide-WindowFromAltTab
+    Set-WidgetMoveMode $false
+})
 $script:Window.Add_Loaded({
     Update-TrayToggleText
     Clamp-WidgetToScreenBounds
@@ -5473,6 +5757,9 @@ $script:Window.Add_SizeChanged({ Clamp-WidgetToScreenBounds })
 
 $script:Border = New-Object System.Windows.Controls.Border
 $script:Border.Background = [System.Windows.Media.Brushes]::Transparent
+$script:Border.BorderBrush = Get-BackgroundBorderBrush
+$script:Border.BorderThickness = Get-BackgroundBorderThickness
+$script:Border.CornerRadius = Get-BackgroundCornerRadius
 $script:Border.Padding = New-Object System.Windows.Thickness 0
 $script:Window.Content = $script:Border
 
@@ -5482,6 +5769,8 @@ $script:Border.Child = $script:WidgetGrid
 $script:BackgroundLayer = New-Object System.Windows.Shapes.Rectangle
 $script:BackgroundLayer.Fill = Get-BackgroundBrush $script:BackgroundOpacity
 $script:BackgroundLayer.Opacity = $script:BackgroundOpacity
+$script:BackgroundLayer.RadiusX = Get-BackgroundCornerRadiusValue
+$script:BackgroundLayer.RadiusY = Get-BackgroundCornerRadiusValue
 $script:BackgroundLayer.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Stretch
 $script:BackgroundLayer.VerticalAlignment = [System.Windows.VerticalAlignment]::Stretch
 $script:WidgetGrid.Children.Add($script:BackgroundLayer) | Out-Null
@@ -5491,6 +5780,23 @@ $script:ContentStack.Orientation = [System.Windows.Controls.Orientation]::Vertic
 $script:ContentStack.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Center
 $script:ContentStack.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
 $script:WidgetGrid.Children.Add($script:ContentStack) | Out-Null
+
+$script:MoveModeFixButton = New-Object System.Windows.Controls.Button
+$script:MoveModeFixButton.Content = "고정"
+$script:MoveModeFixButton.Width = 82
+$script:MoveModeFixButton.Height = 34
+$script:MoveModeFixButton.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Center
+$script:MoveModeFixButton.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+$script:MoveModeFixButton.Visibility = [System.Windows.Visibility]::Collapsed
+$script:MoveModeFixButton.IsHitTestVisible = $false
+$script:MoveModeFixButton.Opacity = 0.95
+$script:MoveModeFixButton.Cursor = [System.Windows.Input.Cursors]::Hand
+$script:MoveModeFixButton.Add_Click({
+    Set-WidgetMoveMode $false
+    Save-WidgetConfig
+})
+[System.Windows.Controls.Panel]::SetZIndex($script:MoveModeFixButton, 10)
+$script:WidgetGrid.Children.Add($script:MoveModeFixButton) | Out-Null
 
 $script:BdoTimePanel = New-Object System.Windows.Controls.StackPanel
 $script:BdoTimePanel.Orientation = [System.Windows.Controls.Orientation]::Horizontal
@@ -5609,11 +5915,16 @@ Apply-BdoTimeStyle
 
 $dragHandler = {
     param($sender, $eventArgs)
+    if (-not $script:WidgetMoveMode) {
+        return
+    }
+
     if ($eventArgs.ChangedButton -eq [System.Windows.Input.MouseButton]::Left) {
         try {
             $script:Window.DragMove()
             Clamp-WidgetToScreenBounds
             Save-WidgetConfig
+            $eventArgs.Handled = $true
         }
         catch {
         }
