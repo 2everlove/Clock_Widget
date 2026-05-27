@@ -1989,29 +1989,31 @@ function New-BossRowEditorRow {
     $card.AllowDrop = $manualOrderingEnabled
     $card.ToolTip = if ($manualOrderingEnabled) { "같은 우선도 안에서 왼쪽 핸들을 드래그하여 순서를 바꿀 수 있습니다." } else { "정렬이 적용된 상태에서는 순번을 바꿀 수 없습니다." }
     Set-BossRowEditorDropVisual $card $false
-    $card.Add_MouseEnter({ param($sender, $eventArgs) Set-BossRowEditorDropVisual $sender $true })
-    $card.Add_MouseLeave({ param($sender, $eventArgs) Set-BossRowEditorDropVisual $sender $false })
-    $card.Add_DragEnter({
-        param($sender, $eventArgs)
-        if ($eventArgs.Data.GetDataPresent("ClockWidgetBossRowIndex")) {
-            Set-BossRowEditorDropVisual $sender $true
-            $eventArgs.Effects = [System.Windows.DragDropEffects]::Move
-            $eventArgs.Handled = $true
-        }
-    })
-    $card.Add_DragLeave({ param($sender, $eventArgs) Set-BossRowEditorDropVisual $sender $false })
-    $card.Add_DragOver({
-        param($sender, $eventArgs)
-        if ($eventArgs.Data.GetDataPresent("ClockWidgetBossRowIndex")) {
-            $eventArgs.Effects = [System.Windows.DragDropEffects]::Move
-            $eventArgs.Handled = $true
-        }
-    })
-    $card.Add_Drop({
-        param($sender, $eventArgs)
-        Set-BossRowEditorDropVisual $sender $false
-        Drop-BossRow $sender $eventArgs
-    })
+    if ($manualOrderingEnabled) {
+        $card.Add_MouseEnter({ param($sender, $eventArgs) Set-BossRowEditorDropVisual $sender $true })
+        $card.Add_MouseLeave({ param($sender, $eventArgs) Set-BossRowEditorDropVisual $sender $false })
+        $card.Add_DragEnter({
+            param($sender, $eventArgs)
+            if ($eventArgs.Data.GetDataPresent("ClockWidgetBossRowIndex")) {
+                Set-BossRowEditorDropVisual $sender $true
+                $eventArgs.Effects = [System.Windows.DragDropEffects]::Move
+                $eventArgs.Handled = $true
+            }
+        })
+        $card.Add_DragLeave({ param($sender, $eventArgs) Set-BossRowEditorDropVisual $sender $false })
+        $card.Add_DragOver({
+            param($sender, $eventArgs)
+            if ($eventArgs.Data.GetDataPresent("ClockWidgetBossRowIndex")) {
+                $eventArgs.Effects = [System.Windows.DragDropEffects]::Move
+                $eventArgs.Handled = $true
+            }
+        })
+        $card.Add_Drop({
+            param($sender, $eventArgs)
+            Set-BossRowEditorDropVisual $sender $false
+            Drop-BossRow $sender $eventArgs
+        })
+    }
 
     $cardBody = New-Object System.Windows.Controls.Grid
     $card.Child = $cardBody
