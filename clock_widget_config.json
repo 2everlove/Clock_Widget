@@ -18,7 +18,7 @@
     "MeridiemLanguage":  "ko",
     "BdoTimeEnabled":  true,
     "BdoTimeFormat":  "12",
-    "BdoIconType":  "blackSpirit",
+    "BdoIconType":  "papu",
     "BdoIconEnabled":  true,
     "BdoFontSize":  14,
     "BdoTimeOffsetSeconds":  0,
@@ -45,9 +45,549 @@
     "BossAlertAfterSeconds":  180,
     "BossMarginTop":  0,
     "BossMarginBottom":  0,
-    "BossHighlightAnimationSeconds":  1,
+    "BossHighlightAnimationSeconds":  1.5,
     "BossHighlightColor":  "#FF00FF",
     "BossRows":  [
+                     {
+                         "Name":  "벨",
+                         "Days":  [
+                                      "Thu",
+                                      "Sun"
+                                  ],
+                         "Times":  [
 
+                                   ],
+                         "DayTimes":  {
+                                          "Mon":  {
+
+                                                  },
+                                          "Tue":  {
+
+                                                  },
+                                          "Wed":  {
+
+                                                  },
+                                          "Thu":  "00:15",
+                                          "Fri":  {
+
+                                                  },
+                                          "Sat":  {
+
+                                                  },
+                                          "Sun":  "17:00"
+                                      },
+                         "Priority":  0,
+                         "Highlight":  false,
+                         "Alert":  true
+                     },
+                     {
+                         "Name":  "가모스",
+                         "Days":  [
+                                      "Mon",
+                                      "Tue",
+                                      "Wed",
+                                      "Thu",
+                                      "Fri",
+                                      "Sat",
+                                      "Sun"
+                                  ],
+                         "Times":  [
+                                       "00:15",
+                                       "14:00",
+                                       "23:15"
+                                   ],
+                         "DayTimes":  {
+                                          "Mon":  [
+                                                      "14:00",
+                                                      "23:15"
+                                                  ],
+                                          "Tue":  [
+                                                      "14:00",
+                                                      "23:15"
+                                                  ],
+                                          "Wed":  [
+                                                      "14:00",
+                                                      "23:15"
+                                                  ],
+                                          "Thu":  [
+                                                      "14:00",
+                                                      "23:15"
+                                                  ],
+                                          "Fri":  [
+                                                      "14:00",
+                                                      "23:15"
+                                                  ],
+                                          "Sat":  "14:00",
+                                          "Sun":  [
+                                                      "00:15",
+                                                      "14:00",
+                                                      "23:15"
+                                                  ]
+                                      },
+                         "Priority":  0,
+                         "Highlight":  false,
+                         "Alert":  true
+                     },
+                     {
+                         "Name":  "불가살",
+                         "Days":  [
+                                      "Mon",
+                                      "Tue",
+                                      "Wed",
+                                      "Thu",
+                                      "Fri",
+                                      "Sat",
+                                      "Sun"
+                                  ],
+                         "Times":  [
+                                       "02:00",
+                                       "11:00",
+                                       "16:00",
+                                       "20:00",
+                                       "23:30"
+                                   ],
+                         "DayTimes":  {
+                                          "Mon":  [
+                                                      "02:00",
+                                                      "23:30"
+                                                  ],
+                                          "Tue":  "20:00",
+                                          "Wed":  "20:00",
+                                          "Thu":  "16:00",
+                                          "Fri":  "11:00",
+                                          "Sat":  "02:00",
+                                          "Sun":  "11:00"
+                                      },
+                         "Priority":  0,
+                         "Highlight":  false,
+                         "Alert":  true
+                     },
+                     {
+                         "Name":  "크자카",
+                         "Days":  [
+                                      "Mon",
+                                      "Tue",
+                                      "Wed",
+                                      "Thu",
+                                      "Fri",
+                                      "Sat",
+                                      "Sun"
+                                  ],
+                         "Times":  [
+                                       "02:00",
+                                       "11:00",
+                                       "16:00",
+                                       "20:00",
+                                       "23:30"
+                                   ],
+                         "DayTimes":  {
+                                          "Mon":  "02:00",
+                                          "Tue":  "20:00",
+                                          "Wed":  "23:30",
+                                          "Thu":  "11:00",
+                                          "Fri":  "16:00",
+                                          "Sat":  "16:00",
+                                          "Sun":  "20:00"
+                                      },
+                         "Priority":  1,
+                         "Highlight":  false,
+                         "Alert":  true
+                     },
+                     {
+                         "Name":  "우투리",
+                         "Days":  [
+                                      "Mon",
+                                      "Tue",
+                                      "Wed",
+                                      "Thu",
+                                      "Fri",
+                                      "Sat",
+                                      "Sun"
+                                  ],
+                         "Times":  [
+                                       "02:00",
+                                       "11:00",
+                                       "16:00",
+                                       "20:00",
+                                       "23:30"
+                                   ],
+                         "DayTimes":  {
+                                          "Mon":  "11:00",
+                                          "Tue":  [
+                                                      "02:00",
+                                                      "23:30"
+                                                  ],
+                                          "Wed":  "23:30",
+                                          "Thu":  "20:00",
+                                          "Fri":  "16:00",
+                                          "Sat":  "11:00",
+                                          "Sun":  "16:00"
+                                      },
+                         "Priority":  0,
+                         "Highlight":  false,
+                         "Alert":  true
+                     },
+                     {
+                         "Name":  "누베르",
+                         "Days":  [
+                                      "Mon",
+                                      "Tue",
+                                      "Thu",
+                                      "Fri",
+                                      "Sun"
+                                  ],
+                         "Times":  [
+                                       "02:00",
+                                       "11:00",
+                                       "16:00",
+                                       "20:00"
+                                   ],
+                         "DayTimes":  {
+                                          "Mon":  "11:00",
+                                          "Tue":  [
+                                                      "02:00",
+                                                      "16:00"
+                                                  ],
+                                          "Wed":  {
+
+                                                  },
+                                          "Thu":  [
+                                                      "16:00",
+                                                      "20:00"
+                                                  ],
+                                          "Fri":  "20:00",
+                                          "Sat":  {
+
+                                                  },
+                                          "Sun":  [
+                                                      "02:00",
+                                                      "23:30"
+                                                  ]
+                                      },
+                         "Priority":  1,
+                         "Highlight":  false,
+                         "Alert":  true
+                     },
+                     {
+                         "Name":  "금돼지왕",
+                         "Days":  [
+                                      "Mon",
+                                      "Tue",
+                                      "Wed",
+                                      "Thu",
+                                      "Fri",
+                                      "Sat",
+                                      "Sun"
+                                  ],
+                         "Times":  [
+                                       "02:00",
+                                       "11:00",
+                                       "16:00",
+                                       "20:00",
+                                       "23:30"
+                                   ],
+                         "DayTimes":  {
+                                          "Mon":  "16:00",
+                                          "Tue":  "11:00",
+                                          "Wed":  "02:00",
+                                          "Thu":  [
+                                                      "02:00",
+                                                      "23:30"
+                                                  ],
+                                          "Fri":  "20:00",
+                                          "Sat":  "16:00",
+                                          "Sun":  "23:30"
+                                      },
+                         "Priority":  0,
+                         "Highlight":  false,
+                         "Alert":  true
+                     },
+                     {
+                         "Name":  "오핀",
+                         "Days":  [
+                                      "Mon",
+                                      "Wed",
+                                      "Fri"
+                                  ],
+                         "Times":  [
+                                       "02:00",
+                                       "23:30"
+                                   ],
+                         "DayTimes":  {
+                                          "Mon":  "23:30",
+                                          "Tue":  {
+
+                                                  },
+                                          "Wed":  "02:00",
+                                          "Thu":  {
+
+                                                  },
+                                          "Fri":  "23:30",
+                                          "Sat":  {
+
+                                                  },
+                                          "Sun":  {
+
+                                                  }
+                                      },
+                         "Priority":  1,
+                         "Highlight":  false,
+                         "Alert":  true
+                     },
+                     {
+                         "Name":  "카란다",
+                         "Days":  [
+                                      "Mon",
+                                      "Tue",
+                                      "Wed",
+                                      "Thu",
+                                      "Fri",
+                                      "Sat",
+                                      "Sun"
+                                  ],
+                         "Times":  [
+                                       "02:00",
+                                       "11:00",
+                                       "16:00",
+                                       "20:00",
+                                       "23:30"
+                                   ],
+                         "DayTimes":  {
+                                          "Mon":  "20:00",
+                                          "Tue":  "23:30",
+                                          "Wed":  "16:00",
+                                          "Thu":  "02:00",
+                                          "Fri":  "11:00",
+                                          "Sat":  "11:00",
+                                          "Sun":  "16:00"
+                                      },
+                         "Priority":  1,
+                         "Highlight":  false,
+                         "Alert":  true
+                     },
+                     {
+                         "Name":  "산군",
+                         "Days":  [
+                                      "Mon",
+                                      "Tue",
+                                      "Wed",
+                                      "Thu",
+                                      "Fri",
+                                      "Sun"
+                                  ],
+                         "Times":  [
+                                       "02:00",
+                                       "11:00",
+                                       "16:00",
+                                       "20:00",
+                                       "23:30"
+                                   ],
+                         "DayTimes":  {
+                                          "Mon":  "20:00",
+                                          "Tue":  "16:00",
+                                          "Wed":  "16:00",
+                                          "Thu":  "11:00",
+                                          "Fri":  [
+                                                      "02:00",
+                                                      "23:30"
+                                                  ],
+                                          "Sat":  {
+
+                                                  },
+                                          "Sun":  [
+                                                      "02:00",
+                                                      "20:00"
+                                                  ]
+                                      },
+                         "Priority":  0,
+                         "Highlight":  false,
+                         "Alert":  true
+                     },
+                     {
+                         "Name":  "쿠툼",
+                         "Days":  [
+                                      "Mon",
+                                      "Tue",
+                                      "Wed",
+                                      "Thu",
+                                      "Fri",
+                                      "Sat",
+                                      "Sun"
+                                  ],
+                         "Times":  [
+                                       "02:00",
+                                       "11:00",
+                                       "16:00",
+                                       "20:00",
+                                       "23:30"
+                                   ],
+                         "DayTimes":  {
+                                          "Mon":  "16:00",
+                                          "Tue":  "11:00",
+                                          "Wed":  "20:00",
+                                          "Thu":  "23:30",
+                                          "Fri":  "02:00",
+                                          "Sat":  "02:00",
+                                          "Sun":  "11:00"
+                                      },
+                         "Priority":  1,
+                         "Highlight":  false,
+                         "Alert":  true
+                     },
+                     {
+                         "Name":  "검은그림자",
+                         "Days":  [
+                                      "Sat"
+                                  ],
+                         "Times":  [
+
+                                   ],
+                         "DayTimes":  {
+                                          "Mon":  {
+
+                                                  },
+                                          "Tue":  {
+
+                                                  },
+                                          "Wed":  {
+
+                                                  },
+                                          "Thu":  {
+
+                                                  },
+                                          "Fri":  {
+
+                                                  },
+                                          "Sat":  "17:00",
+                                          "Sun":  {
+
+                                                  }
+                                      },
+                         "Priority":  0,
+                         "Highlight":  false,
+                         "Alert":  true
+                     },
+                     {
+                         "Name":  "귄트",
+                         "Days":  [
+                                      "Wed",
+                                      "Sat"
+                                  ],
+                         "Times":  [
+
+                                   ],
+                         "DayTimes":  {
+                                          "Mon":  {
+
+                                                  },
+                                          "Tue":  {
+
+                                                  },
+                                          "Wed":  "19:00",
+                                          "Thu":  {
+
+                                                  },
+                                          "Fri":  {
+
+                                                  },
+                                          "Sat":  "19:00",
+                                          "Sun":  {
+
+                                                  }
+                                      },
+                         "Priority":  0,
+                         "Highlight":  false,
+                         "Alert":  true
+                     },
+                     {
+                         "Name":  "무라카",
+                         "Days":  [
+                                      "Wed",
+                                      "Sat"
+                                  ],
+                         "Times":  [
+
+                                   ],
+                         "DayTimes":  {
+                                          "Mon":  {
+
+                                                  },
+                                          "Tue":  {
+
+                                                  },
+                                          "Wed":  "19:00",
+                                          "Thu":  {
+
+                                                  },
+                                          "Fri":  {
+
+                                                  },
+                                          "Sat":  "19:00",
+                                          "Sun":  {
+
+                                                  }
+                                      },
+                         "Priority":  1,
+                         "Highlight":  false,
+                         "Alert":  true
+                     },
+                     {
+                         "Name":  "【이벤트】검은 날개",
+                         "Days":  [
+                                      "Mon",
+                                      "Tue",
+                                      "Wed",
+                                      "Thu",
+                                      "Fri",
+                                      "Sat",
+                                      "Sun"
+                                  ],
+                         "Times":  [
+                                       "12:00",
+                                       "17:25",
+                                       "18:00",
+                                       "23:25"
+                                   ],
+                         "DayTimes":  {
+                                          "Mon":  [
+                                                      "12:00",
+                                                      "18:00",
+                                                      "23:25"
+                                                  ],
+                                          "Tue":  [
+                                                      "12:00",
+                                                      "18:00",
+                                                      "23:25"
+                                                  ],
+                                          "Wed":  [
+                                                      "12:00",
+                                                      "18:00",
+                                                      "23:25"
+                                                  ],
+                                          "Thu":  [
+                                                      "12:00",
+                                                      "18:00",
+                                                      "23:25"
+                                                  ],
+                                          "Fri":  [
+                                                      "12:00",
+                                                      "18:00",
+                                                      "23:25"
+                                                  ],
+                                          "Sat":  [
+                                                      "12:00",
+                                                      "18:00",
+                                                      "23:25"
+                                                  ],
+                                          "Sun":  [
+                                                      "12:00",
+                                                      "17:25",
+                                                      "23:25"
+                                                  ]
+                                      },
+                         "Priority":  0,
+                         "Highlight":  true,
+                         "Alert":  true
+                     }
                  ]
 }
