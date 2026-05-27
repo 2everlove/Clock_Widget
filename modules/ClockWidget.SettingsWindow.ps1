@@ -165,6 +165,182 @@ function Update-SettingsPreview {
             $script:BossPreviewHostPanel.Visibility = [System.Windows.Visibility]::Collapsed
         }
     }
+    Apply-SettingsPreviewSectionOrder
+}
+
+function Get-SettingsPreviewSectionContainer {
+    param([string]$Key)
+
+    switch ($Key) {
+        "BdoTime" { return $script:BdoPreviewContainer }
+        "BossAlert" { return $script:BossPreviewContainer }
+        "Clock" { return $script:ClockPreviewContainer }
+    }
+    $null
+}
+
+function Apply-SettingsPreviewSectionOrder {
+    if (-not $script:SettingsPreviewStack) {
+        return
+    }
+
+    $order = @(Normalize-WidgetSectionOrder (Get-SettingOrScriptValue "WidgetSectionOrder"))
+    foreach ($key in @(Get-DefaultWidgetSectionOrder)) {
+        $container = Get-SettingsPreviewSectionContainer $key
+        if ($container -and $script:SettingsPreviewStack.Children.Contains($container)) {
+            $script:SettingsPreviewStack.Children.Remove($container)
+        }
+    }
+
+    foreach ($key in $order) {
+        $container = Get-SettingsPreviewSectionContainer $key
+        if ($container) {
+            $script:SettingsPreviewStack.Children.Add($container) | Out-Null
+        }
+    }
+}
+
+function Set-PreviewSectionDropVisual {
+    param(
+        [System.Windows.Controls.Border]$Border,
+        [bool]$Active
+    )
+
+    if (-not $Border) {
+        return
+    }
+    if ($Active) {
+        $Border.BorderBrush = New-Object System.Windows.Media.SolidColorBrush ([System.Windows.Media.Color]::FromRgb(70, 130, 210))
+        $Border.Background = New-Object System.Windows.Media.SolidColorBrush ([System.Windows.Media.Color]::FromArgb(28, 70, 130, 210))
+    }
+    else {
+        $Border.BorderBrush = New-Object System.Windows.Media.SolidColorBrush ([System.Windows.Media.Color]::FromRgb(145, 145, 145))
+        $Border.Background = [System.Windows.Media.Brushes]::Transparent
+    }
+}
+
+function New-PreviewSectionContainer {
+    param(
+        [string]$Key,
+        [string]$Label,
+        [System.Windows.UIElement]$Content
+    )
+
+    $border = New-Object System.Windows.Controls.Border
+    $border.Tag = $Key
+    $border.Margin = New-Object System.Windows.Thickness 0, 1, 0, 1
+    $border.Padding = New-Object System.Windows.Thickness 6, 2, 6, 2
+    $border.BorderThickness = New-Object System.Windows.Thickness 1
+    $border.CornerRadius = New-Object System.Windows.CornerRadius 4
+    $border.AllowDrop = $true
+    $border.ToolTip = "$Label 위치를 드래그해서 순서를 바꿀 수 있습니다."
+    Set-PreviewSectionDropVisual $border $false
+
+    $dock = New-Object System.Windows.Controls.DockPanel
+    $dock.LastChildFill = $true
+
+    $handle = New-Object System.Windows.Controls.TextBlock
+    $handle.Text = "⋮⋮"
+    $handle.FontSize = 13
+    $handle.Foreground = New-Object System.Windows.Media.SolidColorBrush ([System.Windows.Media.Color]::FromRgb(95, 95, 95))
+    $handle.Cursor = [System.Windows.Input.Cursors]::SizeAll
+    $handle.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+    $handle.Margin = New-Object System.Windows.Thickness 0, 0, 8, 0
+    $handle.Tag = $Key
+    $handle.ToolTip = "$Label 드래그"
+    $handle.Add_MouseMove({
+        param($sender, $eventArgs)
+        Start-SettingsPreviewSectionDrag $sender $eventArgs
+    })
+    [System.Windows.Controls.DockPanel]::SetDock($handle, [System.Windows.Controls.Dock]::Left)
+    $dock.Children.Add($handle) | Out-Null
+
+    $contentHost = New-Object System.Windows.Controls.Grid
+    $contentHost.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Center
+    $contentHost.Children.Add($Content) | Out-Null
+    $dock.Children.Add($contentHost) | Out-Null
+    $border.Child = $dock
+
+    $border.Add_DragEnter({
+        param($sender, $eventArgs)
+        if ($eventArgs.Data.GetDataPresent("ClockWidgetPreviewSectionKey")) {
+            Set-PreviewSectionDropVisual $sender $true
+            $eventArgs.Effects = [System.Windows.DragDropEffects]::Move
+            $eventArgs.Handled = $true
+        }
+    })
+    $border.Add_DragLeave({
+        param($sender, $eventArgs)
+        Set-PreviewSectionDropVisual $sender $false
+    })
+    $border.Add_DragOver({
+        param($sender, $eventArgs)
+        if ($eventArgs.Data.GetDataPresent("ClockWidgetPreviewSectionKey")) {
+            $eventArgs.Effects = [System.Windows.DragDropEffects]::Move
+            $eventArgs.Handled = $true
+        }
+    })
+    $border.Add_Drop({
+        param($sender, $eventArgs)
+        Set-PreviewSectionDropVisual $sender $false
+        Drop-SettingsPreviewSection $sender $eventArgs
+    })
+
+    $border
+}
+
+function Start-SettingsPreviewSectionDrag {
+    param(
+        [object]$Sender,
+        [System.Windows.Input.MouseEventArgs]$EventArgs
+    )
+
+    if ($EventArgs.LeftButton -ne [System.Windows.Input.MouseButtonState]::Pressed -or [string]::IsNullOrWhiteSpace([string]$Sender.Tag)) {
+        return
+    }
+
+    $data = New-Object System.Windows.DataObject
+    $data.SetData("ClockWidgetPreviewSectionKey", [string]$Sender.Tag)
+    [System.Windows.DragDrop]::DoDragDrop($Sender, $data, [System.Windows.DragDropEffects]::Move) | Out-Null
+    $EventArgs.Handled = $true
+}
+
+function Drop-SettingsPreviewSection {
+    param(
+        [object]$Sender,
+        [System.Windows.DragEventArgs]$EventArgs
+    )
+
+    if (-not $script:SettingsDraft -or -not $EventArgs.Data.GetDataPresent("ClockWidgetPreviewSectionKey") -or [string]::IsNullOrWhiteSpace([string]$Sender.Tag)) {
+        return
+    }
+
+    $sourceKey = [string]$EventArgs.Data.GetData("ClockWidgetPreviewSectionKey")
+    $targetKey = [string]$Sender.Tag
+    if ($sourceKey -eq $targetKey) {
+        return
+    }
+
+    $order = New-Object System.Collections.ArrayList
+    foreach ($key in @(Normalize-WidgetSectionOrder $script:SettingsDraft.WidgetSectionOrder)) {
+        $order.Add($key) | Out-Null
+    }
+    if (-not $order.Contains($sourceKey) -or -not $order.Contains($targetKey)) {
+        return
+    }
+
+    $order.Remove($sourceKey)
+    $targetIndex = $order.IndexOf($targetKey)
+    $insertOffset = 0
+    if ($Sender.ActualHeight -gt 0) {
+        $position = $EventArgs.GetPosition($Sender)
+        if ([double]$position.Y -gt ([double]$Sender.ActualHeight / 2.0)) {
+            $insertOffset = 1
+        }
+    }
+    $order.Insert([Math]::Min($order.Count, $targetIndex + $insertOffset), $sourceKey)
+    Set-SettingsDraftValue "WidgetSectionOrder" @($order) | Out-Null
+    $EventArgs.Handled = $true
 }
 
 function Request-SettingsPreviewUpdate {
@@ -599,6 +775,8 @@ function Show-SettingsWindow {
     $script:SettingsDraft = Copy-SettingsSnapshot $script:SettingsOriginal
     $script:SettingsDirty = $false
     $script:SettingsCloseAction = $null
+    $script:BossRowsEditorSortKey = $null
+    $script:BossRowsEditorSortDirection = $null
 
     $settingsRoot = New-Object System.Windows.Controls.Grid
     $contentRow = New-Object System.Windows.Controls.RowDefinition
@@ -1185,10 +1363,10 @@ function Show-SettingsWindow {
     $script:ColorPreviewBackground.Padding = New-Object System.Windows.Thickness 10, 8, 10, 8
     $script:ColorPreviewBackground.Margin = New-Object System.Windows.Thickness 0
 
-    $previewStack = New-Object System.Windows.Controls.StackPanel
-    $previewStack.Orientation = [System.Windows.Controls.Orientation]::Vertical
-    $previewStack.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Center
-    $previewStack.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+    $script:SettingsPreviewStack = New-Object System.Windows.Controls.StackPanel
+    $script:SettingsPreviewStack.Orientation = [System.Windows.Controls.Orientation]::Vertical
+    $script:SettingsPreviewStack.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Center
+    $script:SettingsPreviewStack.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
 
     $script:BdoPreviewPanel = New-Object System.Windows.Controls.StackPanel
     $script:BdoPreviewPanel.Orientation = [System.Windows.Controls.Orientation]::Horizontal
@@ -1281,13 +1459,13 @@ function Show-SettingsWindow {
     $script:BdoTransitionPreviewText.LineStackingStrategy = [System.Windows.LineStackingStrategy]::BlockLineHeight
     $script:BdoTransitionPreviewGrid.Children.Add($script:BdoTransitionPreviewText) | Out-Null
     $script:BdoPreviewPanel.Children.Add($script:BdoTransitionPreviewGrid) | Out-Null
-    $previewStack.Children.Add($script:BdoPreviewPanel) | Out-Null
+    $script:BdoPreviewContainer = New-PreviewSectionContainer "BdoTime" "검은사막 게임 내 시간" $script:BdoPreviewPanel
 
     $script:BossPreviewHostPanel = New-Object System.Windows.Controls.StackPanel
     $script:BossPreviewHostPanel.Orientation = [System.Windows.Controls.Orientation]::Vertical
     $script:BossPreviewHostPanel.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Center
     $script:BossPreviewHostPanel.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
-    $previewStack.Children.Add($script:BossPreviewHostPanel) | Out-Null
+    $script:BossPreviewContainer = New-PreviewSectionContainer "BossAlert" "보스 알림" $script:BossPreviewHostPanel
 
     $colorPreviewTextGrid = New-Object System.Windows.Controls.Grid
     $colorPreviewTextGrid.Background = [System.Windows.Media.Brushes]::Transparent
@@ -1328,8 +1506,9 @@ function Show-SettingsWindow {
     $script:ColorPreviewText.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
     $script:ColorPreviewText.LineStackingStrategy = [System.Windows.LineStackingStrategy]::BlockLineHeight
     $colorPreviewTextGrid.Children.Add($script:ColorPreviewText) | Out-Null
-    $previewStack.Children.Add($colorPreviewTextGrid) | Out-Null
-    $script:ColorPreviewBackground.Child = $previewStack
+    $script:ClockPreviewContainer = New-PreviewSectionContainer "Clock" "실제 시간" $colorPreviewTextGrid
+    Apply-SettingsPreviewSectionOrder
+    $script:ColorPreviewBackground.Child = $script:SettingsPreviewStack
     $previewHostPanel.Children.Add($script:ColorPreviewBackground) | Out-Null
 
     $buttonPanel = New-Object System.Windows.Controls.StackPanel
@@ -1503,6 +1682,8 @@ function Show-SettingsWindow {
         $script:ColorPreviewOutlineTextBlocks = $null
         $script:ColorPreviewOutlinePath = $null
         $script:ColorPreviewText = $null
+        $script:SettingsPreviewStack = $null
+        $script:BdoPreviewContainer = $null
         $script:BdoPreviewPanel = $null
         $script:BdoPreviewImage = $null
         $script:BdoPreviewTextGrid = $null
@@ -1513,13 +1694,17 @@ function Show-SettingsWindow {
         $script:BdoTransitionPreviewOutlineTextBlocks = $null
         $script:BdoTransitionPreviewOutlinePath = $null
         $script:BdoTransitionPreviewText = $null
+        $script:BossPreviewContainer = $null
         $script:BossPreviewHostPanel = $null
+        $script:ClockPreviewContainer = $null
         $script:SettingsOriginal = $null
         $script:SettingsDraft = $null
         $script:SettingsDirty = $false
         $script:SettingsCloseAction = $null
         $script:SyncingSettingsControls = $false
         $script:BossRowsEditorSignature = $null
+        $script:BossRowsEditorSortKey = $null
+        $script:BossRowsEditorSortDirection = $null
     })
 
     $settings.Show() | Out-Null

@@ -1,6 +1,35 @@
 ﻿# Clock Widget module: ClockWidget.Core.ps1
 # This file is dot-sourced by ClockWidget.ps1.
 
+function Get-DefaultWidgetSectionOrder {
+    @("BdoTime", "BossAlert", "Clock")
+}
+
+function Normalize-WidgetSectionOrder {
+    param([object]$Order)
+
+    $valid = @(Get-DefaultWidgetSectionOrder)
+    $normalized = @()
+    foreach ($item in @($Order)) {
+        $key = [string]$item
+        if ($valid -contains $key -and $normalized -notcontains $key) {
+            $normalized += $key
+        }
+    }
+    foreach ($key in $valid) {
+        if ($normalized -notcontains $key) {
+            $normalized += $key
+        }
+    }
+    @($normalized)
+}
+
+function Get-WidgetSectionOrderSignature {
+    param([object]$Order)
+
+    (Normalize-WidgetSectionOrder $Order) -join "|"
+}
+
 function Get-DefaultConfig {
     [pscustomobject]@{
         X = 80
@@ -52,6 +81,7 @@ function Get-DefaultConfig {
         BossHighlightAnimationSeconds = 1.5
         BossHighlightColor = "#FFFFFF"
         BossRows = @(Get-DefaultBossRows)
+        WidgetSectionOrder = @(Get-DefaultWidgetSectionOrder)
     }
 }
 
@@ -64,11 +94,12 @@ function Read-WidgetConfig {
         $config = Get-Content -LiteralPath $script:ConfigPath -Raw | ConvertFrom-Json
         $default = Get-DefaultConfig
 
-        foreach ($name in "X", "Y", "FontSize", "BackgroundColor", "BackgroundBorderColor", "BackgroundBorderColorTransparent", "BackgroundBorderThickness", "BackgroundBorderRadius", "TextColor", "TextColorTransparent", "TextOutlineColor", "TextOutlineColorTransparent", "FontFamily", "TrayIconPath", "TimeFormat", "MeridiemLanguage", "BdoTimeEnabled", "BdoTimeFormat", "BdoIconType", "BdoIconEnabled", "BdoFontSize", "BdoTimeOffsetSeconds", "BdoTextColor", "BdoTextColorTransparent", "BdoTextOutlineColor", "BdoTextOutlineColorTransparent", "BdoFontFamily", "BdoTransitionEnabled", "BdoTransitionFontSize", "BdoTransitionTextColor", "BdoTransitionTextColorTransparent", "BdoTransitionTextOutlineColor", "BdoTransitionTextOutlineColorTransparent", "BdoTransitionFontFamily", "BossAlertEnabled", "BossFontSize", "BossTextColor", "BossTextColorTransparent", "BossTextOutlineColor", "BossTextOutlineColorTransparent", "BossFontFamily", "BossAlertBeforeSeconds", "BossAlertAfterSeconds", "BossMarginTop", "BossMarginBottom", "BossHighlightAnimationSeconds", "BossHighlightColor", "BossRows") {
+        foreach ($name in "X", "Y", "FontSize", "BackgroundColor", "BackgroundBorderColor", "BackgroundBorderColorTransparent", "BackgroundBorderThickness", "BackgroundBorderRadius", "TextColor", "TextColorTransparent", "TextOutlineColor", "TextOutlineColorTransparent", "FontFamily", "TrayIconPath", "TimeFormat", "MeridiemLanguage", "BdoTimeEnabled", "BdoTimeFormat", "BdoIconType", "BdoIconEnabled", "BdoFontSize", "BdoTimeOffsetSeconds", "BdoTextColor", "BdoTextColorTransparent", "BdoTextOutlineColor", "BdoTextOutlineColorTransparent", "BdoFontFamily", "BdoTransitionEnabled", "BdoTransitionFontSize", "BdoTransitionTextColor", "BdoTransitionTextColorTransparent", "BdoTransitionTextOutlineColor", "BdoTransitionTextOutlineColorTransparent", "BdoTransitionFontFamily", "BossAlertEnabled", "BossFontSize", "BossTextColor", "BossTextColorTransparent", "BossTextOutlineColor", "BossTextOutlineColorTransparent", "BossFontFamily", "BossAlertBeforeSeconds", "BossAlertAfterSeconds", "BossMarginTop", "BossMarginBottom", "BossHighlightAnimationSeconds", "BossHighlightColor", "BossRows", "WidgetSectionOrder") {
             if ($null -eq $config.$name) {
                 $config | Add-Member -NotePropertyName $name -NotePropertyValue $default.$name
             }
         }
+        $config.WidgetSectionOrder = @(Normalize-WidgetSectionOrder $config.WidgetSectionOrder)
 
         if ($null -eq $config.BackgroundOpacity) {
             if ($null -ne $config.Opacity) {
@@ -146,6 +177,7 @@ function Save-WidgetConfig {
         BossHighlightAnimationSeconds = [double]$script:BossHighlightAnimationSeconds
         BossHighlightColor = [string]$script:BossHighlightColor
         BossRows = @(Copy-BossRows $script:BossRows)
+        WidgetSectionOrder = @(Normalize-WidgetSectionOrder $script:WidgetSectionOrder)
     }
 
     $configJson = $config | ConvertTo-Json -Depth 8
@@ -177,7 +209,7 @@ function Get-SettingsPropertyNames {
         "BossAlertEnabled", "BossFontSize", "BossTextColor", "BossTextColorTransparent",
         "BossTextOutlineColor", "BossTextOutlineColorTransparent", "BossFontFamily",
         "BossAlertBeforeSeconds", "BossAlertAfterSeconds", "BossMarginTop", "BossMarginBottom",
-        "BossHighlightAnimationSeconds", "BossHighlightColor", "BossRows", "StartupEnabled"
+        "BossHighlightAnimationSeconds", "BossHighlightColor", "BossRows", "WidgetSectionOrder", "StartupEnabled"
     )
 }
 
@@ -230,6 +262,7 @@ function Get-SettingsSnapshot {
         BossHighlightAnimationSeconds = [double]$script:BossHighlightAnimationSeconds
         BossHighlightColor = [string]$script:BossHighlightColor
         BossRows = @(Copy-BossRows $script:BossRows)
+        WidgetSectionOrder = @(Normalize-WidgetSectionOrder $script:WidgetSectionOrder)
         StartupEnabled = [bool](Test-StartupEnabled)
     }
 }
@@ -257,6 +290,12 @@ function Test-SettingsSnapshotEqual {
     foreach ($name in (Get-SettingsPropertyNames)) {
         if ($name -eq "BossRows") {
             if ((Get-BossRowsSignature $Left.BossRows) -ne (Get-BossRowsSignature $Right.BossRows)) {
+                return $false
+            }
+            continue
+        }
+        if ($name -eq "WidgetSectionOrder") {
+            if ((Get-WidgetSectionOrderSignature $Left.WidgetSectionOrder) -ne (Get-WidgetSectionOrderSignature $Right.WidgetSectionOrder)) {
                 return $false
             }
             continue
@@ -318,6 +357,7 @@ function Set-SettingsVariables {
     $script:BossHighlightAnimationSeconds = [double]$Snapshot.BossHighlightAnimationSeconds
     $script:BossHighlightColor = [string]$Snapshot.BossHighlightColor
     $script:BossRows = @(Copy-BossRows $Snapshot.BossRows)
+    $script:WidgetSectionOrder = @(Normalize-WidgetSectionOrder $Snapshot.WidgetSectionOrder)
 }
 
 function Set-StartupState {
@@ -353,6 +393,7 @@ function Apply-SettingsSnapshot {
     Apply-ClockTextStyle
     Apply-BdoTimeStyle
     Apply-BossAlertStyle
+    Apply-WidgetSectionOrder
     Reset-BossAlertRuntimeCache
     if ($script:BossAlertPanel) {
         $script:BossAlertPanel.Children.Clear()
@@ -597,6 +638,7 @@ function Sync-SettingsControlsForDraftChange {
                 if ($script:BossFontFamilyText) { Set-FontValueText $script:BossFontFamilyText $draft.BossFontFamily }
             }
             "BossRows" { Refresh-BossRowsEditor }
+            "WidgetSectionOrder" { Apply-SettingsPreviewSectionOrder }
             "BossHighlightAnimationSeconds" {
                 if ($script:BossHighlightAnimationTextBox) { $script:BossHighlightAnimationTextBox.Text = ([double]$draft.BossHighlightAnimationSeconds).ToString("0.##", [System.Globalization.CultureInfo]::InvariantCulture) }
             }
@@ -667,6 +709,11 @@ function Set-SettingsDraftValue {
             return $true
         }
     }
+    elseif ($Name -eq "WidgetSectionOrder") {
+        if ((Get-WidgetSectionOrderSignature $currentValue) -eq (Get-WidgetSectionOrderSignature $Value)) {
+            return $true
+        }
+    }
     elseif ([string]$currentValue -eq [string]$Value) {
         return $true
     }
@@ -720,6 +767,112 @@ function Set-WidgetClickThrough {
     [NativeWindowTools]::SetWindowLongPtr($handle, [NativeWindowTools]::GWL_EXSTYLE, (New-Object IntPtr $style)) | Out-Null
 }
 
+function Get-WidgetSectionElement {
+    param([string]$Key)
+
+    switch ($Key) {
+        "BdoTime" { return $script:BdoTimePanel }
+        "BossAlert" { return $script:BossAlertPanel }
+        "Clock" { return $script:ClockTextGrid }
+    }
+    $null
+}
+
+function Apply-WidgetSectionOrder {
+    if (-not $script:ContentStack) {
+        return
+    }
+
+    $order = @(Normalize-WidgetSectionOrder $script:WidgetSectionOrder)
+    foreach ($key in @(Get-DefaultWidgetSectionOrder)) {
+        $element = Get-WidgetSectionElement $key
+        if ($element -and $script:ContentStack.Children.Contains($element)) {
+            $script:ContentStack.Children.Remove($element)
+        }
+    }
+
+    foreach ($key in $order) {
+        $element = Get-WidgetSectionElement $key
+        if ($element) {
+            $script:ContentStack.Children.Add($element) | Out-Null
+        }
+    }
+    $script:WidgetSectionOrder = @($order)
+}
+
+function Set-WidgetSectionOrder {
+    param(
+        [object]$Order,
+        [bool]$Persist = $false
+    )
+
+    $nextOrder = @(Normalize-WidgetSectionOrder $Order)
+    if ((Get-WidgetSectionOrderSignature $script:WidgetSectionOrder) -eq (Get-WidgetSectionOrderSignature $nextOrder)) {
+        return
+    }
+
+    $script:WidgetSectionOrder = @($nextOrder)
+    Apply-WidgetSectionOrder
+    if ($Persist) {
+        Save-WidgetConfig
+    }
+}
+
+function Start-WidgetSectionDrag {
+    param(
+        [object]$Sender,
+        [System.Windows.Input.MouseEventArgs]$EventArgs
+    )
+
+    if (-not $script:WidgetMoveMode -or $EventArgs.LeftButton -ne [System.Windows.Input.MouseButtonState]::Pressed -or [string]::IsNullOrWhiteSpace([string]$Sender.Tag)) {
+        return
+    }
+
+    $data = New-Object System.Windows.DataObject
+    $data.SetData("ClockWidgetSectionKey", [string]$Sender.Tag)
+    [System.Windows.DragDrop]::DoDragDrop($Sender, $data, [System.Windows.DragDropEffects]::Move) | Out-Null
+    $EventArgs.Handled = $true
+}
+
+function Drop-WidgetSection {
+    param(
+        [object]$Sender,
+        [System.Windows.DragEventArgs]$EventArgs
+    )
+
+    if (-not $script:WidgetMoveMode -or -not $EventArgs.Data.GetDataPresent("ClockWidgetSectionKey") -or [string]::IsNullOrWhiteSpace([string]$Sender.Tag)) {
+        return
+    }
+
+    $sourceKey = [string]$EventArgs.Data.GetData("ClockWidgetSectionKey")
+    $targetKey = [string]$Sender.Tag
+    if ($sourceKey -eq $targetKey) {
+        return
+    }
+
+    $order = New-Object System.Collections.ArrayList
+    foreach ($key in @(Normalize-WidgetSectionOrder $script:WidgetSectionOrder)) {
+        $order.Add($key) | Out-Null
+    }
+    if (-not $order.Contains($sourceKey) -or -not $order.Contains($targetKey)) {
+        return
+    }
+
+    $order.Remove($sourceKey)
+    $targetIndex = $order.IndexOf($targetKey)
+    $targetElement = Get-WidgetSectionElement $targetKey
+    $insertOffset = 0
+    if ($targetElement -and $targetElement.ActualHeight -gt 0) {
+        $position = $EventArgs.GetPosition($targetElement)
+        if ([double]$position.Y -gt ([double]$targetElement.ActualHeight / 2.0)) {
+            $insertOffset = 1
+        }
+    }
+    $order.Insert([Math]::Min($order.Count, $targetIndex + $insertOffset), $sourceKey)
+    Set-WidgetSectionOrder -Order @($order) -Persist $true
+    $EventArgs.Handled = $true
+}
+
 function Set-WidgetMoveMode {
     param([bool]$Enabled)
 
@@ -741,6 +894,11 @@ function Set-WidgetMoveMode {
     }
     if ($script:ContentStack) {
         $script:ContentStack.Cursor = $moveCursor
+    }
+    foreach ($section in @($script:BdoTimePanel, $script:BossAlertPanel, $script:ClockTextGrid)) {
+        if ($section) {
+            $section.Cursor = $moveCursor
+        }
     }
     if ($script:MoveModeFixButton) {
         $script:MoveModeFixButton.Visibility = if ($Enabled) { [System.Windows.Visibility]::Visible } else { [System.Windows.Visibility]::Collapsed }

@@ -97,6 +97,7 @@ function Get-DefaultBossRows {
             Priority = [int]$row.Priority
             Highlight = [bool]$row.Highlight
             Alert = [bool]$row.Alert
+            Order = $null
         }
     }
 }
@@ -167,6 +168,13 @@ function Normalize-BossRows {
         $days = @($dayKeys | Where-Object { @($dayTimes[$_]).Count -gt 0 })
         [int]$priority = 0
         [void][int]::TryParse(([string]$row.Priority), [ref]$priority)
+        $order = $null
+        if ($row.PSObject.Properties["Order"] -and $null -ne $row.Order -and -not [string]::IsNullOrWhiteSpace([string]$row.Order)) {
+            [int]$parsedOrder = 0
+            if ([int]::TryParse(([string]$row.Order), [ref]$parsedOrder) -and $parsedOrder -gt 0) {
+                $order = $parsedOrder
+            }
+        }
 
         $normalized += [pscustomobject]@{
             Name = $name
@@ -176,6 +184,7 @@ function Normalize-BossRows {
             Priority = [Math]::Max(0, [Math]::Min(10, $priority))
             Highlight = [bool]$row.Highlight
             Alert = if ($null -eq $row.Alert) { $true } else { [bool]$row.Alert }
+            Order = $order
         }
     }
 
@@ -194,6 +203,7 @@ function Copy-BossRows {
             Priority = [int]$_.Priority
             Highlight = [bool]$_.Highlight
             Alert = [bool]$_.Alert
+            Order = $_.Order
         }
     })
 }
@@ -623,6 +633,7 @@ function Get-CustomBossScheduleEntries {
                     Priority = [int]$row.Priority
                     Highlight = [bool]$row.Highlight
                     Alert = [bool]$row.Alert
+                    Order = $row.Order
                 }
             }
         }
@@ -640,6 +651,7 @@ function Get-BossScheduleEventsForDay {
             Priority = [int]$entry.Priority
             Highlight = [bool]$entry.Highlight
             Alert = [bool]$entry.Alert
+            Order = $entry.Order
         }
     }
 }
@@ -693,6 +705,7 @@ function Get-BossAlertItems {
                 $events += [pscustomobject]@{
                     Time = $eventTime
                     Priority = [int]$entry.Priority
+                    Order = $entry.Order
                     Highlight = [bool]$entry.Highlight
                     Name = [string]$entry.Name
                     State = "before"
@@ -703,6 +716,7 @@ function Get-BossAlertItems {
                 $events += [pscustomobject]@{
                     Time = $eventTime
                     Priority = [int]$entry.Priority
+                    Order = $entry.Order
                     Highlight = [bool]$entry.Highlight
                     Name = [string]$entry.Name
                     State = "now"
@@ -714,7 +728,7 @@ function Get-BossAlertItems {
 
     $grouped = @()
     foreach ($group in ($events | Group-Object { "{0:O}|{1}" -f $_.Time, $_.State })) {
-        $items = @($group.Group | Sort-Object Priority, Name)
+        $items = @($group.Group | Sort-Object Priority, @{ Expression = { if ($null -eq $_.Order) { [int]::MaxValue } else { [int]$_.Order } } }, Name)
         if ($items.Count -eq 0) {
             continue
         }
@@ -1126,6 +1140,7 @@ function Add-BossRow {
         Priority = 0
         Highlight = $false
         Alert = $true
+        Order = $null
     }
     Set-BossRows $rows
 }
@@ -1228,6 +1243,7 @@ function Update-BossRowPriority {
     [int]$priority = 0
     [void][int]::TryParse($Value, [ref]$priority)
     $rows[$Index].Priority = [Math]::Max(0, [Math]::Min(10, $priority))
+    $rows[$Index].Order = $null
     Set-BossRows $rows
 }
 
@@ -1259,6 +1275,254 @@ function Update-BossRowHighlight {
 
     $rows[$Index].Highlight = $Value
     Set-BossRows $rows
+}
+
+function Get-BossRowSortOrderValue {
+    param([object]$BossRow)
+
+    if ($null -eq $BossRow -or $null -eq $BossRow.Order) {
+        return [int]::MaxValue
+    }
+    [int]$BossRow.Order
+}
+
+function Get-BossRowScheduleSortRank {
+    param([object]$BossRow)
+
+    if (Test-BossRowScheduleConfigured $BossRow) {
+        return 0
+    }
+    1
+}
+
+function Get-BossRowsEditorEntries {
+    $rows = @(Get-EditableBossRows)
+    $entries = @()
+    for ($i = 0; $i -lt $rows.Count; $i++) {
+        $entries += [pscustomobject]@{
+            Index = $i
+            Row = $rows[$i]
+        }
+    }
+
+    switch ($script:BossRowsEditorSortKey) {
+        "Name" {
+            $descending = ($script:BossRowsEditorSortDirection -eq "desc")
+            return @($entries | Sort-Object @{ Expression = { Get-BossRowScheduleSortRank $_.Row } }, @{ Expression = { [string]$_.Row.Name }; Descending = $descending }, @{ Expression = { [int]$_.Row.Priority } }, @{ Expression = { Get-BossRowSortOrderValue $_.Row } })
+        }
+        "Priority" {
+            $descending = ($script:BossRowsEditorSortDirection -eq "desc")
+            return @($entries | Sort-Object @{ Expression = { Get-BossRowScheduleSortRank $_.Row } }, @{ Expression = { [int]$_.Row.Priority }; Descending = $descending }, @{ Expression = { Get-BossRowSortOrderValue $_.Row } }, @{ Expression = { [string]$_.Row.Name } })
+        }
+        default {
+            return @($entries | Sort-Object @{ Expression = { Get-BossRowScheduleSortRank $_.Row } }, @{ Expression = { [int]$_.Row.Priority } }, @{ Expression = { Get-BossRowSortOrderValue $_.Row } }, @{ Expression = { [string]$_.Row.Name } })
+        }
+    }
+}
+
+function Get-BossRowsEditorSortLabel {
+    param(
+        [string]$Label,
+        [string]$Key
+    )
+
+    if ($script:BossRowsEditorSortKey -ne $Key) {
+        return $Label
+    }
+    if ($script:BossRowsEditorSortDirection -eq "desc") {
+        return "$Label ▼"
+    }
+    "$Label ▲"
+}
+
+function Test-BossRowsEditorPriorityGrouping {
+    [string]::IsNullOrWhiteSpace($script:BossRowsEditorSortKey) -or $script:BossRowsEditorSortKey -eq "Priority"
+}
+
+function New-BossRowsEditorPrioritySeparator {
+    $separator = New-Object System.Windows.Controls.Border
+    $separator.Height = 1
+    $separator.Margin = New-Object System.Windows.Thickness 0, 3, 0, 9
+    $separator.Background = New-Object System.Windows.Media.SolidColorBrush ([System.Windows.Media.Color]::FromRgb(205, 205, 205))
+    $separator
+}
+
+function New-BossRowsEditorUnscheduledSeparator {
+    $separator = New-Object System.Windows.Controls.Border
+    $separator.Height = 1
+    $separator.Margin = New-Object System.Windows.Thickness 0, 5, 0, 9
+    $separator.Background = New-Object System.Windows.Media.SolidColorBrush ([System.Windows.Media.Color]::FromRgb(160, 160, 160))
+    $separator
+}
+
+function New-BossRowsEditorHeaderCell {
+    param(
+        [string]$Label,
+        [int]$Column,
+        [string]$SortKey = ""
+    )
+
+    $cell = New-Object System.Windows.Controls.TextBlock
+    $cell.Text = $Label
+    $cell.FontSize = 11
+    $cell.Opacity = 0.82
+    $cell.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+    $cell.Padding = New-Object System.Windows.Thickness 2, 0, 2, 2
+    if (-not [string]::IsNullOrWhiteSpace($SortKey)) {
+        $cell.Tag = $SortKey
+        $cell.Cursor = [System.Windows.Input.Cursors]::Hand
+        $cell.ToolTip = "클릭해서 정렬"
+        $cell.FontWeight = [System.Windows.FontWeights]::SemiBold
+        $cell.Add_MouseLeftButtonUp({
+            param($sender, $eventArgs)
+            Toggle-BossRowsEditorSort ([string]$sender.Tag)
+            $eventArgs.Handled = $true
+        })
+        $cell.Add_MouseEnter({
+            param($sender, $eventArgs)
+            $sender.TextDecorations = [System.Windows.TextDecorations]::Underline
+            $sender.Opacity = 1.0
+        })
+        $cell.Add_MouseLeave({
+            param($sender, $eventArgs)
+            $sender.TextDecorations = $null
+            $sender.Opacity = 0.82
+        })
+    }
+    [System.Windows.Controls.Grid]::SetColumn($cell, $Column)
+    $cell
+}
+
+function Toggle-BossRowsEditorSort {
+    param([string]$Key)
+
+    if ($script:BossRowsEditorSortKey -ne $Key) {
+        $script:BossRowsEditorSortKey = $Key
+        $script:BossRowsEditorSortDirection = "asc"
+    }
+    elseif ($script:BossRowsEditorSortDirection -eq "asc") {
+        $script:BossRowsEditorSortDirection = "desc"
+    }
+    else {
+        $script:BossRowsEditorSortKey = $null
+        $script:BossRowsEditorSortDirection = $null
+    }
+
+    Refresh-BossRowsEditor $true
+}
+
+function Test-BossRowsEditorManualOrderingEnabled {
+    [string]::IsNullOrWhiteSpace($script:BossRowsEditorSortKey)
+}
+
+function Move-BossRowWithinPriority {
+    param(
+        [int]$SourceIndex,
+        [int]$TargetIndex
+    )
+
+    if (-not (Test-BossRowsEditorManualOrderingEnabled)) {
+        return
+    }
+
+    $rows = @(Get-EditableBossRows)
+    if ($SourceIndex -lt 0 -or $SourceIndex -ge $rows.Count -or $TargetIndex -lt 0 -or $TargetIndex -ge $rows.Count -or $SourceIndex -eq $TargetIndex) {
+        return
+    }
+
+    $priority = [int]$rows[$SourceIndex].Priority
+    if ([int]$rows[$TargetIndex].Priority -ne $priority) {
+        return
+    }
+
+    $script:BossRowsEditorSortKey = $null
+    $script:BossRowsEditorSortDirection = $null
+    $group = @(Get-BossRowsEditorEntries | Where-Object { [int]$_.Row.Priority -eq $priority })
+    $sourceEntry = @($group | Where-Object { $_.Index -eq $SourceIndex } | Select-Object -First 1)
+    $targetEntry = @($group | Where-Object { $_.Index -eq $TargetIndex } | Select-Object -First 1)
+    if ($sourceEntry.Count -eq 0 -or $targetEntry.Count -eq 0) {
+        return
+    }
+
+    $ordered = @($group | Where-Object { $_.Index -ne $SourceIndex })
+    $nextGroup = @()
+    foreach ($entry in $ordered) {
+        if ($entry.Index -eq $TargetIndex) {
+            $nextGroup += $sourceEntry[0]
+        }
+        $nextGroup += $entry
+    }
+
+    for ($i = 0; $i -lt $nextGroup.Count; $i++) {
+        $rows[$nextGroup[$i].Index].Order = $i + 1
+    }
+    Set-BossRows $rows
+}
+
+function Start-BossRowDrag {
+    param(
+        [object]$Sender,
+        [System.Windows.Input.MouseEventArgs]$EventArgs
+    )
+
+    if (-not (Test-BossRowsEditorManualOrderingEnabled) -or $EventArgs.LeftButton -ne [System.Windows.Input.MouseButtonState]::Pressed -or $null -eq $Sender.Tag) {
+        return
+    }
+
+    $data = New-Object System.Windows.DataObject
+    $data.SetData("ClockWidgetBossRowIndex", [int]$Sender.Tag)
+    [System.Windows.DragDrop]::DoDragDrop($Sender, $data, [System.Windows.DragDropEffects]::Move) | Out-Null
+    $EventArgs.Handled = $true
+}
+
+function Drop-BossRow {
+    param(
+        [object]$Sender,
+        [System.Windows.DragEventArgs]$EventArgs
+    )
+
+    if (-not (Test-BossRowsEditorManualOrderingEnabled) -or -not $EventArgs.Data.GetDataPresent("ClockWidgetBossRowIndex") -or $null -eq $Sender.Tag) {
+        return
+    }
+
+    $sourceIndex = [int]$EventArgs.Data.GetData("ClockWidgetBossRowIndex")
+    $targetIndex = [int]$Sender.Tag
+    Move-BossRowWithinPriority $sourceIndex $targetIndex
+    $EventArgs.Handled = $true
+}
+
+function Set-BossRowEditorDropVisual {
+    param(
+        [System.Windows.Controls.Border]$Border,
+        [bool]$Active
+    )
+
+    if (-not $Border) {
+        return
+    }
+    $dashBorder = $null
+    if ($Border.Child -is [System.Windows.Controls.Grid] -and $Border.Child.Children.Count -gt 0 -and $Border.Child.Children[0] -is [System.Windows.Shapes.Rectangle]) {
+        $dashBorder = $Border.Child.Children[0]
+    }
+
+    if ($Active) {
+        $activeBrush = New-Object System.Windows.Media.SolidColorBrush ([System.Windows.Media.Color]::FromRgb(70, 130, 210))
+        $Border.BorderBrush = $activeBrush
+        $Border.Background = New-Object System.Windows.Media.SolidColorBrush ([System.Windows.Media.Color]::FromArgb(24, 70, 130, 210))
+        if ($dashBorder) {
+            $dashBorder.Stroke = $activeBrush
+            $dashBorder.Opacity = 1.0
+        }
+    }
+    else {
+        $idleBrush = New-Object System.Windows.Media.SolidColorBrush ([System.Windows.Media.Color]::FromRgb(170, 170, 170))
+        $Border.BorderBrush = $idleBrush
+        $Border.Background = New-Object System.Windows.Media.SolidColorBrush ([System.Windows.Media.Color]::FromRgb(252, 252, 252))
+        if ($dashBorder) {
+            $dashBorder.Stroke = $idleBrush
+            $dashBorder.Opacity = 0.0
+        }
+    }
 }
 
 function Show-BossDaysDialog {
@@ -1711,17 +1975,90 @@ function New-BossValueEditCell {
 function New-BossRowEditorRow {
     param(
         [object]$BossRow,
-        [int]$Index
+        [int]$Index,
+        [int]$DisplayNumber
     )
 
-    $row = New-Object System.Windows.Controls.Grid
-    $row.Margin = New-Object System.Windows.Thickness 0, 0, 0, 6
+    $card = New-Object System.Windows.Controls.Border
+    $card.Tag = $Index
+    $card.Margin = New-Object System.Windows.Thickness 0, 0, 0, 6
+    $card.Padding = New-Object System.Windows.Thickness 0
+    $card.BorderThickness = New-Object System.Windows.Thickness 0
+    $card.CornerRadius = New-Object System.Windows.CornerRadius 4
+    $manualOrderingEnabled = Test-BossRowsEditorManualOrderingEnabled
+    $card.AllowDrop = $manualOrderingEnabled
+    $card.ToolTip = if ($manualOrderingEnabled) { "같은 우선도 안에서 왼쪽 핸들을 드래그하여 순서를 바꿀 수 있습니다." } else { "정렬이 적용된 상태에서는 순번을 바꿀 수 없습니다." }
+    Set-BossRowEditorDropVisual $card $false
+    $card.Add_MouseEnter({ param($sender, $eventArgs) Set-BossRowEditorDropVisual $sender $true })
+    $card.Add_MouseLeave({ param($sender, $eventArgs) Set-BossRowEditorDropVisual $sender $false })
+    $card.Add_DragEnter({
+        param($sender, $eventArgs)
+        if ($eventArgs.Data.GetDataPresent("ClockWidgetBossRowIndex")) {
+            Set-BossRowEditorDropVisual $sender $true
+            $eventArgs.Effects = [System.Windows.DragDropEffects]::Move
+            $eventArgs.Handled = $true
+        }
+    })
+    $card.Add_DragLeave({ param($sender, $eventArgs) Set-BossRowEditorDropVisual $sender $false })
+    $card.Add_DragOver({
+        param($sender, $eventArgs)
+        if ($eventArgs.Data.GetDataPresent("ClockWidgetBossRowIndex")) {
+            $eventArgs.Effects = [System.Windows.DragDropEffects]::Move
+            $eventArgs.Handled = $true
+        }
+    })
+    $card.Add_Drop({
+        param($sender, $eventArgs)
+        Set-BossRowEditorDropVisual $sender $false
+        Drop-BossRow $sender $eventArgs
+    })
 
-    foreach ($width in 110, 430, 44, 48, 54, 30) {
+    $cardBody = New-Object System.Windows.Controls.Grid
+    $card.Child = $cardBody
+
+    $dropBorder = New-Object System.Windows.Shapes.Rectangle
+    $dropBorder.Margin = New-Object System.Windows.Thickness 1
+    $dropBorder.RadiusX = 4
+    $dropBorder.RadiusY = 4
+    $dropBorder.StrokeThickness = 1
+    $dropBorder.StrokeDashArray = New-Object System.Windows.Media.DoubleCollection
+    $dropBorder.StrokeDashArray.Add(3) | Out-Null
+    $dropBorder.StrokeDashArray.Add(2) | Out-Null
+    $dropBorder.Opacity = 0
+    $dropBorder.IsHitTestVisible = $false
+    $cardBody.Children.Add($dropBorder) | Out-Null
+
+    $row = New-Object System.Windows.Controls.Grid
+    $row.Margin = New-Object System.Windows.Thickness 4, 3, 4, 3
+    $cardBody.Children.Add($row) | Out-Null
+
+    foreach ($width in 24, 34, 110, 430, 44, 48, 54, 30) {
         $column = New-Object System.Windows.Controls.ColumnDefinition
         $column.Width = New-Object System.Windows.GridLength $width
         $row.ColumnDefinitions.Add($column) | Out-Null
     }
+
+    $dragHandle = New-Object System.Windows.Controls.TextBlock
+    $dragHandle.Text = "⋮⋮"
+    $dragHandle.Tag = $Index
+    $dragHandle.ToolTip = if ($manualOrderingEnabled) { "같은 우선도 안에서 드래그하여 순서를 바꿀 수 있습니다." } else { "보스명/우선도 정렬을 해제하면 순번을 바꿀 수 있습니다." }
+    $dragHandle.Cursor = if ($manualOrderingEnabled) { [System.Windows.Input.Cursors]::SizeAll } else { [System.Windows.Input.Cursors]::Arrow }
+    $dragHandle.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+    $dragHandle.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Center
+    $dragHandle.Foreground = New-Object System.Windows.Media.SolidColorBrush ([System.Windows.Media.Color]::FromRgb(95, 95, 95))
+    $dragHandle.Opacity = if ($manualOrderingEnabled) { 1.0 } else { 0.35 }
+    $dragHandle.Add_MouseMove({ param($sender, $eventArgs) Start-BossRowDrag $sender $eventArgs })
+    [System.Windows.Controls.Grid]::SetColumn($dragHandle, 0)
+    $row.Children.Add($dragHandle) | Out-Null
+
+    $numberBlock = New-Object System.Windows.Controls.TextBlock
+    $numberBlock.Text = [string]$DisplayNumber
+    $numberBlock.ToolTip = "현재 정렬 기준의 순번입니다."
+    $numberBlock.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+    $numberBlock.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Center
+    $numberBlock.Opacity = 0.78
+    [System.Windows.Controls.Grid]::SetColumn($numberBlock, 1)
+    $row.Children.Add($numberBlock) | Out-Null
 
     $nameBox = New-Object System.Windows.Controls.TextBox
     $nameBox.Text = [string]$BossRow.Name
@@ -1738,11 +2075,11 @@ function New-BossRowEditorRow {
             $eventArgs.Handled = $true
         }
     })
-    [System.Windows.Controls.Grid]::SetColumn($nameBox, 0)
+    [System.Windows.Controls.Grid]::SetColumn($nameBox, 2)
     $row.Children.Add($nameBox) | Out-Null
 
     $timesCell = New-BossValueEditCell (Get-BossRowTimesSummary $BossRow) $Index "Times"
-    [System.Windows.Controls.Grid]::SetColumn($timesCell, 1)
+    [System.Windows.Controls.Grid]::SetColumn($timesCell, 3)
     $row.Children.Add($timesCell) | Out-Null
 
     $priorityBox = New-Object System.Windows.Controls.TextBox
@@ -1762,7 +2099,7 @@ function New-BossRowEditorRow {
             $eventArgs.Handled = $true
         }
     })
-    [System.Windows.Controls.Grid]::SetColumn($priorityBox, 2)
+    [System.Windows.Controls.Grid]::SetColumn($priorityBox, 4)
     $row.Children.Add($priorityBox) | Out-Null
 
     $alertCheck = New-Object System.Windows.Controls.CheckBox
@@ -1774,7 +2111,7 @@ function New-BossRowEditorRow {
         param($sender, $eventArgs)
         Update-BossRowAlert ([int]$sender.Tag) ([bool]$sender.IsChecked)
     })
-    [System.Windows.Controls.Grid]::SetColumn($alertCheck, 3)
+    [System.Windows.Controls.Grid]::SetColumn($alertCheck, 5)
     $row.Children.Add($alertCheck) | Out-Null
 
     $highlightCheck = New-Object System.Windows.Controls.CheckBox
@@ -1786,7 +2123,7 @@ function New-BossRowEditorRow {
         param($sender, $eventArgs)
         Update-BossRowHighlight ([int]$sender.Tag) ([bool]$sender.IsChecked)
     })
-    [System.Windows.Controls.Grid]::SetColumn($highlightCheck, 4)
+    [System.Windows.Controls.Grid]::SetColumn($highlightCheck, 6)
     $row.Children.Add($highlightCheck) | Out-Null
 
     $removeButton = New-Object System.Windows.Controls.Button
@@ -1794,10 +2131,10 @@ function New-BossRowEditorRow {
     $removeButton.Tag = $Index
     $removeButton.Width = 24
     $removeButton.Add_Click({ param($sender, $eventArgs) Remove-BossRow ([int]$sender.Tag) })
-    [System.Windows.Controls.Grid]::SetColumn($removeButton, 5)
+    [System.Windows.Controls.Grid]::SetColumn($removeButton, 7)
     $row.Children.Add($removeButton) | Out-Null
 
-    $row
+    $card
 }
 
 function Refresh-BossRowsEditor {
@@ -1808,7 +2145,7 @@ function Refresh-BossRowsEditor {
     }
 
     $rows = @(Get-EditableBossRows)
-    $signature = Get-BossRowsSignature $rows
+    $signature = "{0}|{1}|{2}" -f (Get-BossRowsSignature $rows), $script:BossRowsEditorSortKey, $script:BossRowsEditorSortDirection
     if (-not $Force -and $script:BossRowsEditorSignature -eq $signature) {
         return
     }
@@ -1818,24 +2155,44 @@ function Refresh-BossRowsEditor {
 
     $header = New-Object System.Windows.Controls.Grid
     $header.Margin = New-Object System.Windows.Thickness 0, 4, 0, 4
-    foreach ($width in 110, 430, 44, 48, 54, 30) {
+    foreach ($width in 24, 34, 110, 430, 44, 48, 54, 30) {
         $column = New-Object System.Windows.Controls.ColumnDefinition
         $column.Width = New-Object System.Windows.GridLength $width
         $header.ColumnDefinitions.Add($column) | Out-Null
     }
-    $labels = @("보스", "요일/시간", "우선", "알림", "강조", "")
-    for ($i = 0; $i -lt $labels.Count; $i++) {
-        $label = New-Object System.Windows.Controls.TextBlock
-        $label.Text = $labels[$i]
-        $label.FontSize = 11
-        $label.Opacity = 0.82
-        [System.Windows.Controls.Grid]::SetColumn($label, $i)
-        $header.Children.Add($label) | Out-Null
+    $headers = @(
+        [pscustomobject]@{ Label = ""; Column = 0; SortKey = "" },
+        [pscustomobject]@{ Label = "순번"; Column = 1; SortKey = "" },
+        [pscustomobject]@{ Label = (Get-BossRowsEditorSortLabel "보스" "Name"); Column = 2; SortKey = "Name" },
+        [pscustomobject]@{ Label = "요일/시간"; Column = 3; SortKey = "" },
+        [pscustomobject]@{ Label = (Get-BossRowsEditorSortLabel "우선" "Priority"); Column = 4; SortKey = "Priority" },
+        [pscustomobject]@{ Label = "알림"; Column = 5; SortKey = "" },
+        [pscustomobject]@{ Label = "강조"; Column = 6; SortKey = "" },
+        [pscustomobject]@{ Label = ""; Column = 7; SortKey = "" }
+    )
+    foreach ($item in $headers) {
+        $header.Children.Add((New-BossRowsEditorHeaderCell $item.Label $item.Column $item.SortKey)) | Out-Null
     }
     $script:BossRowsPanel.Children.Add($header) | Out-Null
 
-    for ($i = 0; $i -lt $rows.Count; $i++) {
-        $script:BossRowsPanel.Children.Add((New-BossRowEditorRow $rows[$i] $i)) | Out-Null
+    $entries = @(Get-BossRowsEditorEntries)
+    $showPrioritySeparators = Test-BossRowsEditorPriorityGrouping
+    $previousScheduleRank = $null
+    $previousPriority = $null
+    for ($i = 0; $i -lt $entries.Count; $i++) {
+        $entry = $entries[$i]
+        $currentScheduleRank = Get-BossRowScheduleSortRank $entry.Row
+        $currentPriority = [int]$entry.Row.Priority
+        $isUnscheduledGroupStart = ($i -gt 0 -and $previousScheduleRank -eq 0 -and $currentScheduleRank -eq 1)
+        if ($isUnscheduledGroupStart) {
+            $script:BossRowsPanel.Children.Add((New-BossRowsEditorUnscheduledSeparator)) | Out-Null
+        }
+        elseif ($showPrioritySeparators -and $i -gt 0 -and $previousScheduleRank -eq 0 -and $currentScheduleRank -eq 0 -and $previousPriority -ne $currentPriority) {
+            $script:BossRowsPanel.Children.Add((New-BossRowsEditorPrioritySeparator)) | Out-Null
+        }
+        $script:BossRowsPanel.Children.Add((New-BossRowEditorRow $entry.Row $entry.Index ($i + 1))) | Out-Null
+        $previousScheduleRank = $currentScheduleRank
+        $previousPriority = $currentPriority
     }
 
     $addButton = New-Object System.Windows.Controls.Button

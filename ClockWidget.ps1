@@ -114,6 +114,7 @@ $script:BossMarginBottom = [int]$config.BossMarginBottom
 $script:BossHighlightAnimationSeconds = [double]$config.BossHighlightAnimationSeconds
 $script:BossHighlightColor = [string]$config.BossHighlightColor
 $script:BossRows = @(Copy-BossRows $config.BossRows)
+$script:WidgetSectionOrder = @(Normalize-WidgetSectionOrder $config.WidgetSectionOrder)
 
 $script:Window = New-Object System.Windows.Window
 $script:Window.Title = "Clock Widget"
@@ -290,6 +291,13 @@ $script:ClockTextGrid.Children.Add($script:TextOutlinePath) | Out-Null
 
 $script:TextBlock = New-ClockTextBlock (Get-TextBrush)
 $script:ClockTextGrid.Children.Add($script:TextBlock) | Out-Null
+$script:BdoTimePanel.Tag = "BdoTime"
+$script:BossAlertPanel.Tag = "BossAlert"
+$script:ClockTextGrid.Tag = "Clock"
+$script:BdoTimePanel.AllowDrop = $true
+$script:BossAlertPanel.AllowDrop = $true
+$script:ClockTextGrid.AllowDrop = $true
+Apply-WidgetSectionOrder
 
 Apply-ClockTextStyle
 Apply-BdoTimeStyle
@@ -325,19 +333,6 @@ $rightClickHandler = {
 $script:Border.Add_MouseLeftButtonDown($dragHandler)
 $script:WidgetGrid.Add_MouseLeftButtonDown($dragHandler)
 $script:BackgroundLayer.Add_MouseLeftButtonDown($dragHandler)
-$script:ContentStack.Add_MouseLeftButtonDown($dragHandler)
-$script:BdoTimePanel.Add_MouseLeftButtonDown($dragHandler)
-$script:BdoTextGrid.Add_MouseLeftButtonDown($dragHandler)
-$script:BdoTransitionTextGrid.Add_MouseLeftButtonDown($dragHandler)
-$script:BdoTransitionTextBlock.Add_MouseLeftButtonDown($dragHandler)
-$script:ClockTextGrid.Add_MouseLeftButtonDown($dragHandler)
-$script:TextBlock.Add_MouseLeftButtonDown($dragHandler)
-if ($script:BossAlertTextBlock) {
-    $script:BossAlertTextBlock.Add_MouseLeftButtonDown($dragHandler)
-}
-if ($script:BossAlertPanel) {
-    $script:BossAlertPanel.Add_MouseLeftButtonDown($dragHandler)
-}
 $script:Border.Add_MouseRightButtonUp($rightClickHandler)
 $script:WidgetGrid.Add_MouseRightButtonUp($rightClickHandler)
 $script:BackgroundLayer.Add_MouseRightButtonUp($rightClickHandler)
