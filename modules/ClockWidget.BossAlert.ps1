@@ -1590,11 +1590,11 @@ function Show-BossTimesDialog {
     if ($Index -lt 0 -or $Index -ge $rows.Count) {
         return
     }
-    $selectedDays = @(Get-BossDayDefinitions)
+    $dayDefinitions = @(Get-BossDayDefinitions)
 
     $dialog = New-Object System.Windows.Window
     $dialog.Title = "시간 설정"
-    $dialog.Width = 420
+    $dialog.Width = 700
     $dialog.Height = 520
     $dialog.WindowStartupLocation = [System.Windows.WindowStartupLocation]::CenterOwner
     if ($script:SettingsWindow) { $dialog.Owner = $script:SettingsWindow }
@@ -1603,122 +1603,140 @@ function Show-BossTimesDialog {
     $root.Margin = New-Object System.Windows.Thickness 14
     $root.LastChildFill = $true
 
-    $dayEditors = @{}
+    $timeEditors = New-Object System.Collections.ArrayList
     $contentPanel = New-Object System.Windows.Controls.StackPanel
 
-    if ($selectedDays.Count -eq 0) {
-        $notice = New-Object System.Windows.Controls.TextBlock
-        $notice.Text = "먼저 요일을 설정해 주세요."
-        $notice.Margin = New-Object System.Windows.Thickness 0, 0, 0, 12
-        $contentPanel.Children.Add($notice) | Out-Null
+    $addTimeEditor = {
+        param(
+            [string]$Value,
+            [object]$SelectedDayKeys
+        )
+
+        $parts = Split-BossTimeParts $Value
+        $rowPanel = New-Object System.Windows.Controls.StackPanel
+        $rowPanel.Orientation = [System.Windows.Controls.Orientation]::Horizontal
+        $rowPanel.Margin = New-Object System.Windows.Thickness 0, 0, 0, 8
+
+        $hourBox = New-Object System.Windows.Controls.TextBox
+        $hourBox.Width = 44
+        $hourBox.MaxLength = 2
+        $hourBox.Text = $parts.Hour
+        $hourBox.HorizontalContentAlignment = [System.Windows.HorizontalAlignment]::Right
+        $rowPanel.Children.Add($hourBox) | Out-Null
+
+        $hourLabel = New-Object System.Windows.Controls.TextBlock
+        $hourLabel.Text = " 시 "
+        $hourLabel.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+        $rowPanel.Children.Add($hourLabel) | Out-Null
+
+        $minuteBox = New-Object System.Windows.Controls.TextBox
+        $minuteBox.Width = 44
+        $minuteBox.MaxLength = 2
+        $minuteBox.Text = $parts.Minute
+        $minuteBox.HorizontalContentAlignment = [System.Windows.HorizontalAlignment]::Right
+        $rowPanel.Children.Add($minuteBox) | Out-Null
+
+        $minuteLabel = New-Object System.Windows.Controls.TextBlock
+        $minuteLabel.Text = " 분   "
+        $minuteLabel.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+        $rowPanel.Children.Add($minuteLabel) | Out-Null
+
+        $dayChecks = @{}
+        foreach ($definition in $dayDefinitions) {
+            $check = New-Object System.Windows.Controls.CheckBox
+            $check.Content = $definition.Label
+            $check.Width = 42
+            $check.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+            $check.IsChecked = (@($SelectedDayKeys) -contains $definition.Key)
+            $dayChecks[$definition.Key] = $check
+            $rowPanel.Children.Add($check) | Out-Null
+        }
+
+        $clearDaysButton = New-Object System.Windows.Controls.Button
+        $clearDaysButton.Content = "요일 해제"
+        $clearDaysButton.Width = 72
+        $clearDaysButton.Margin = New-Object System.Windows.Thickness 8, 0, 0, 0
+        $clearDaysButton.ToolTip = "이 시간의 선택된 요일을 모두 해제합니다."
+        $clearDaysButton.Tag = $dayChecks
+        $clearDaysButton.Add_Click({
+            param($sender, $eventArgs)
+            foreach ($check in $sender.Tag.Values) {
+                $check.IsChecked = $false
+            }
+        })
+        $rowPanel.Children.Add($clearDaysButton) | Out-Null
+
+        $entry = [pscustomobject]@{
+            HourBox = $hourBox
+            MinuteBox = $minuteBox
+            DayChecks = $dayChecks
+            Row = $rowPanel
+        }
+
+        $remove = New-Object System.Windows.Controls.Button
+        $remove.Content = "x"
+        $remove.Width = 28
+        $remove.Margin = New-Object System.Windows.Thickness 8, 0, 0, 0
+        $remove.Tag = [pscustomobject]@{
+            Row = $rowPanel
+            Entry = $entry
+            List = $timeEditors
+            Panel = $contentPanel
+        }
+        $remove.Add_Click({
+            param($sender, $eventArgs)
+            $sender.Tag.Panel.Children.Remove($sender.Tag.Row) | Out-Null
+            $sender.Tag.List.Remove($sender.Tag.Entry) | Out-Null
+        })
+        $rowPanel.Children.Add($remove) | Out-Null
+
+        $contentPanel.Children.Add($rowPanel) | Out-Null
+        $timeEditors.Add($entry) | Out-Null
+    }.GetNewClosure()
+
+    $timeDaysByTime = @{}
+    foreach ($definition in $dayDefinitions) {
+        $dayProperty = $rows[$Index].DayTimes.PSObject.Properties[$definition.Key]
+        if (-not $dayProperty) {
+            continue
+        }
+        foreach ($time in @($dayProperty.Value)) {
+            $normalizedTime = Normalize-BossTime $time
+            if ($null -eq $normalizedTime) {
+                continue
+            }
+            if (-not $timeDaysByTime.ContainsKey($normalizedTime)) {
+                $timeDaysByTime[$normalizedTime] = New-Object System.Collections.ArrayList
+            }
+            if (-not $timeDaysByTime[$normalizedTime].Contains($definition.Key)) {
+                $timeDaysByTime[$normalizedTime].Add($definition.Key) | Out-Null
+            }
+        }
+    }
+
+    $initialTimes = @($timeDaysByTime.Keys | Sort-Object)
+    if ($initialTimes.Count -eq 0) {
+        & $addTimeEditor "12:00" @()
     }
     else {
-        $addTimeBox = {
-            param(
-                [string]$DayKey,
-                [System.Windows.Controls.StackPanel]$TargetPanel,
-                [string]$Value
-            )
-
-            $parts = Split-BossTimeParts $Value
-            $rowPanel = New-Object System.Windows.Controls.StackPanel
-            $rowPanel.Orientation = [System.Windows.Controls.Orientation]::Horizontal
-            $rowPanel.Margin = New-Object System.Windows.Thickness 0, 0, 0, 8
-
-            $hourBox = New-Object System.Windows.Controls.TextBox
-            $hourBox.Width = 44
-            $hourBox.MaxLength = 2
-            $hourBox.Text = $parts.Hour
-            $hourBox.HorizontalContentAlignment = [System.Windows.HorizontalAlignment]::Right
-            $rowPanel.Children.Add($hourBox) | Out-Null
-
-            $hourLabel = New-Object System.Windows.Controls.TextBlock
-            $hourLabel.Text = " 시 "
-            $hourLabel.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
-            $rowPanel.Children.Add($hourLabel) | Out-Null
-
-            $minuteBox = New-Object System.Windows.Controls.TextBox
-            $minuteBox.Width = 44
-            $minuteBox.MaxLength = 2
-            $minuteBox.Text = $parts.Minute
-            $minuteBox.HorizontalContentAlignment = [System.Windows.HorizontalAlignment]::Right
-            $rowPanel.Children.Add($minuteBox) | Out-Null
-
-            $minuteLabel = New-Object System.Windows.Controls.TextBlock
-            $minuteLabel.Text = " 분"
-            $minuteLabel.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
-            $rowPanel.Children.Add($minuteLabel) | Out-Null
-
-            $entry = [pscustomobject]@{
-                HourBox = $hourBox
-                MinuteBox = $minuteBox
-            }
-
-            $remove = New-Object System.Windows.Controls.Button
-            $remove.Content = "-"
-            $remove.Width = 28
-            $remove.Margin = New-Object System.Windows.Thickness 8, 0, 0, 0
-            $remove.Tag = [pscustomobject]@{
-                Row = $rowPanel
-                Entry = $entry
-                List = $dayEditors[$DayKey]
-                Panel = $TargetPanel
-            }
-            $remove.Add_Click({
-                param($sender, $eventArgs)
-                $sender.Tag.Panel.Children.Remove($sender.Tag.Row) | Out-Null
-                $sender.Tag.List.Remove($sender.Tag.Entry) | Out-Null
-            })
-            $rowPanel.Children.Add($remove) | Out-Null
-
-            $TargetPanel.Children.Add($rowPanel) | Out-Null
-            $dayEditors[$DayKey].Add($entry) | Out-Null
-        }.GetNewClosure()
-
-        foreach ($definition in $selectedDays) {
-            $dayBlock = New-Object System.Windows.Controls.Border
-            $dayBlock.BorderThickness = New-Object System.Windows.Thickness 0, 0, 0, 1
-            $dayBlock.BorderBrush = New-Object System.Windows.Media.SolidColorBrush ([System.Windows.Media.Color]::FromRgb(210, 210, 210))
-            $dayBlock.Margin = New-Object System.Windows.Thickness 0, 0, 0, 12
-            $dayBlock.Padding = New-Object System.Windows.Thickness 0, 0, 0, 10
-
-            $dayPanel = New-Object System.Windows.Controls.StackPanel
-            $title = New-Object System.Windows.Controls.TextBlock
-            $title.Text = "$($definition.Label)요일"
-            $title.FontWeight = [System.Windows.FontWeights]::Bold
-            $title.Margin = New-Object System.Windows.Thickness 0, 0, 0, 8
-            $dayPanel.Children.Add($title) | Out-Null
-
-            $timeListPanel = New-Object System.Windows.Controls.StackPanel
-            $dayEditors[$definition.Key] = New-Object System.Collections.ArrayList
-            foreach ($time in @($rows[$Index].DayTimes.PSObject.Properties[$definition.Key].Value)) {
-                & $addTimeBox $definition.Key $timeListPanel $time
-            }
-            $dayPanel.Children.Add($timeListPanel) | Out-Null
-
-            $addButton = New-Object System.Windows.Controls.Button
-            $addButton.Content = "+"
-            $addButton.Width = 34
-            $addButton.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Left
-            $addButton.Tag = [pscustomobject]@{
-                DayKey = $definition.Key
-                Panel = $timeListPanel
-                AddHandler = $addTimeBox
-            }
-            $addButton.Add_Click({
-                param($sender, $eventArgs)
-                & $sender.Tag.AddHandler $sender.Tag.DayKey $sender.Tag.Panel "12:00"
-            })
-            $dayPanel.Children.Add($addButton) | Out-Null
-
-            $dayBlock.Child = $dayPanel
-            $contentPanel.Children.Add($dayBlock) | Out-Null
+        foreach ($time in $initialTimes) {
+            & $addTimeEditor $time @($timeDaysByTime[$time])
         }
     }
 
     $scroll = New-Object System.Windows.Controls.ScrollViewer
     $scroll.VerticalScrollBarVisibility = [System.Windows.Controls.ScrollBarVisibility]::Auto
     $scroll.Content = $contentPanel
+
+    $addButton = New-Object System.Windows.Controls.Button
+    $addButton.Content = "+ 시간 추가"
+    $addButton.Width = 86
+    $addButton.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Left
+    $addButton.Margin = New-Object System.Windows.Thickness 0, 0, 0, 8
+    $addButton.Add_Click({
+        & $addTimeEditor "12:00" @()
+    }.GetNewClosure())
+    [System.Windows.Controls.DockPanel]::SetDock($addButton, [System.Windows.Controls.Dock]::Bottom)
 
     $buttonPanel = New-Object System.Windows.Controls.StackPanel
     $buttonPanel.Orientation = [System.Windows.Controls.Orientation]::Horizontal
@@ -1731,46 +1749,57 @@ function Show-BossTimesDialog {
     $okButton.Add_Click({
         $nextDayTimes = [ordered]@{}
         foreach ($definition in Get-BossDayDefinitions) {
-            if ($dayEditors.ContainsKey($definition.Key)) {
-                $times = @()
-                foreach ($entry in @($dayEditors[$definition.Key])) {
-                    $hourText = ([string]$entry.HourBox.Text).Trim()
-                    $minuteText = ([string]$entry.MinuteBox.Text).Trim()
-                    [int]$hour = 0
-                    [int]$minute = 0
+            $nextDayTimes[$definition.Key] = @()
+        }
 
-                    if ($hourText -notmatch '^\d{1,2}$' -or -not [int]::TryParse($hourText, [ref]$hour) -or $hour -lt 0 -or $hour -gt 23) {
-                        [System.Windows.MessageBox]::Show(
-                            "$($definition.Label)요일의 시는 0부터 23까지 숫자 1~2자리로 입력해 주세요.",
-                            "시간 입력 오류",
-                            [System.Windows.MessageBoxButton]::OK,
-                            [System.Windows.MessageBoxImage]::Warning
-                        ) | Out-Null
-                        $entry.HourBox.Focus() | Out-Null
-                        $entry.HourBox.SelectAll()
-                        return
-                    }
-
-                    if ($minuteText -notmatch '^\d{1,2}$' -or -not [int]::TryParse($minuteText, [ref]$minute) -or $minute -lt 0 -or $minute -gt 59) {
-                        [System.Windows.MessageBox]::Show(
-                            "$($definition.Label)요일의 분은 0부터 59까지 숫자 1~2자리로 입력해 주세요.",
-                            "시간 입력 오류",
-                            [System.Windows.MessageBoxButton]::OK,
-                            [System.Windows.MessageBoxImage]::Warning
-                        ) | Out-Null
-                        $entry.MinuteBox.Focus() | Out-Null
-                        $entry.MinuteBox.SelectAll()
-                        return
-                    }
-
-                    $times += ("{0:00}:{1:00}" -f $hour, $minute)
+        foreach ($entry in @($timeEditors)) {
+            $selectedDayKeys = @()
+            foreach ($definition in Get-BossDayDefinitions) {
+                if ([bool]$entry.DayChecks[$definition.Key].IsChecked) {
+                    $selectedDayKeys += $definition.Key
                 }
+            }
+            if ($selectedDayKeys.Count -eq 0) {
+                continue
+            }
 
-                $nextDayTimes[$definition.Key] = @($times | Sort-Object -Unique)
+            $hourText = ([string]$entry.HourBox.Text).Trim()
+            $minuteText = ([string]$entry.MinuteBox.Text).Trim()
+            [int]$hour = 0
+            [int]$minute = 0
+
+            if ($hourText -notmatch '^\d{1,2}$' -or -not [int]::TryParse($hourText, [ref]$hour) -or $hour -lt 0 -or $hour -gt 23) {
+                [System.Windows.MessageBox]::Show(
+                    "시는 0부터 23까지 숫자 1~2자리로 입력해 주세요.",
+                    "시간 입력 오류",
+                    [System.Windows.MessageBoxButton]::OK,
+                    [System.Windows.MessageBoxImage]::Warning
+                ) | Out-Null
+                $entry.HourBox.Focus() | Out-Null
+                $entry.HourBox.SelectAll()
+                return
             }
-            else {
-                $nextDayTimes[$definition.Key] = @($rows[$Index].DayTimes.PSObject.Properties[$definition.Key].Value)
+
+            if ($minuteText -notmatch '^\d{1,2}$' -or -not [int]::TryParse($minuteText, [ref]$minute) -or $minute -lt 0 -or $minute -gt 59) {
+                [System.Windows.MessageBox]::Show(
+                    "분은 0부터 59까지 숫자 1~2자리로 입력해 주세요.",
+                    "시간 입력 오류",
+                    [System.Windows.MessageBoxButton]::OK,
+                    [System.Windows.MessageBoxImage]::Warning
+                ) | Out-Null
+                $entry.MinuteBox.Focus() | Out-Null
+                $entry.MinuteBox.SelectAll()
+                return
             }
+
+            $time = ("{0:00}:{1:00}" -f $hour, $minute)
+            foreach ($dayKey in $selectedDayKeys) {
+                $nextDayTimes[$dayKey] = @($nextDayTimes[$dayKey]) + $time
+            }
+        }
+
+        foreach ($definition in Get-BossDayDefinitions) {
+            $nextDayTimes[$definition.Key] = @($nextDayTimes[$definition.Key] | Sort-Object -Unique)
         }
         $rows[$Index].DayTimes = [pscustomobject]$nextDayTimes
         $rows[$Index].Times = @($nextDayTimes.Values | ForEach-Object { $_ } | Sort-Object -Unique)
@@ -1787,6 +1816,7 @@ function Show-BossTimesDialog {
     $cancelButton.Add_Click({ $dialog.Close() }.GetNewClosure())
     $buttonPanel.Children.Add($cancelButton) | Out-Null
     $root.Children.Add($buttonPanel) | Out-Null
+    $root.Children.Add($addButton) | Out-Null
     $root.Children.Add($scroll) | Out-Null
 
     $dialog.Content = $root
