@@ -49,6 +49,15 @@ function Get-DefaultConfig {
         TrayIconPath = ""
         TimeFormat = "24"
         MeridiemLanguage = "en"
+        ClockDateEnabled = $false
+        ClockDatePosition = "Above"
+        ClockDateFormat = "yyyy/MM/dd (ddd)"
+        ClockDateFontSize = 16
+        ClockDateTextColor = "#FFFFFF"
+        ClockDateTextColorTransparent = $false
+        ClockDateTextOutlineColor = "#000000"
+        ClockDateTextOutlineColorTransparent = $false
+        ClockDateFontFamily = "Segoe UI"
         BdoTimeEnabled = $false
         BdoTimeFormat = "24"
         BdoIconType = "blackSpirit"
@@ -94,10 +103,16 @@ function Read-WidgetConfig {
         $config = Get-Content -LiteralPath $script:ConfigPath -Raw | ConvertFrom-Json
         $default = Get-DefaultConfig
 
-        foreach ($name in "X", "Y", "FontSize", "BackgroundColor", "BackgroundBorderColor", "BackgroundBorderColorTransparent", "BackgroundBorderThickness", "BackgroundBorderRadius", "TextColor", "TextColorTransparent", "TextOutlineColor", "TextOutlineColorTransparent", "FontFamily", "TrayIconPath", "TimeFormat", "MeridiemLanguage", "BdoTimeEnabled", "BdoTimeFormat", "BdoIconType", "BdoIconEnabled", "BdoFontSize", "BdoTimeOffsetSeconds", "BdoTextColor", "BdoTextColorTransparent", "BdoTextOutlineColor", "BdoTextOutlineColorTransparent", "BdoFontFamily", "BdoTransitionEnabled", "BdoTransitionFontSize", "BdoTransitionTextColor", "BdoTransitionTextColorTransparent", "BdoTransitionTextOutlineColor", "BdoTransitionTextOutlineColorTransparent", "BdoTransitionFontFamily", "BossAlertEnabled", "BossFontSize", "BossTextColor", "BossTextColorTransparent", "BossTextOutlineColor", "BossTextOutlineColorTransparent", "BossFontFamily", "BossAlertBeforeSeconds", "BossAlertAfterSeconds", "BossMarginTop", "BossMarginBottom", "BossHighlightAnimationSeconds", "BossHighlightColor", "BossRows", "WidgetSectionOrder") {
+        foreach ($name in "X", "Y", "FontSize", "BackgroundColor", "BackgroundBorderColor", "BackgroundBorderColorTransparent", "BackgroundBorderThickness", "BackgroundBorderRadius", "TextColor", "TextColorTransparent", "TextOutlineColor", "TextOutlineColorTransparent", "FontFamily", "TrayIconPath", "TimeFormat", "MeridiemLanguage", "ClockDateEnabled", "ClockDatePosition", "ClockDateFormat", "ClockDateFontSize", "ClockDateTextColor", "ClockDateTextColorTransparent", "ClockDateTextOutlineColor", "ClockDateTextOutlineColorTransparent", "ClockDateFontFamily", "BdoTimeEnabled", "BdoTimeFormat", "BdoIconType", "BdoIconEnabled", "BdoFontSize", "BdoTimeOffsetSeconds", "BdoTextColor", "BdoTextColorTransparent", "BdoTextOutlineColor", "BdoTextOutlineColorTransparent", "BdoFontFamily", "BdoTransitionEnabled", "BdoTransitionFontSize", "BdoTransitionTextColor", "BdoTransitionTextColorTransparent", "BdoTransitionTextOutlineColor", "BdoTransitionTextOutlineColorTransparent", "BdoTransitionFontFamily", "BossAlertEnabled", "BossFontSize", "BossTextColor", "BossTextColorTransparent", "BossTextOutlineColor", "BossTextOutlineColorTransparent", "BossFontFamily", "BossAlertBeforeSeconds", "BossAlertAfterSeconds", "BossMarginTop", "BossMarginBottom", "BossHighlightAnimationSeconds", "BossHighlightColor", "BossRows", "WidgetSectionOrder") {
             if ($null -eq $config.$name) {
                 $config | Add-Member -NotePropertyName $name -NotePropertyValue $default.$name
             }
+        }
+        if (@("Above", "Below", "Inline") -notcontains [string]$config.ClockDatePosition) {
+            $config.ClockDatePosition = $default.ClockDatePosition
+        }
+        if ([string]::IsNullOrWhiteSpace([string]$config.ClockDateFormat)) {
+            $config.ClockDateFormat = $default.ClockDateFormat
         }
         $config.WidgetSectionOrder = @(Normalize-WidgetSectionOrder $config.WidgetSectionOrder)
 
@@ -145,6 +160,15 @@ function Save-WidgetConfig {
         TrayIconPath = [string]$script:TrayIconPath
         TimeFormat = [string]$script:TimeFormat
         MeridiemLanguage = [string]$script:MeridiemLanguage
+        ClockDateEnabled = [bool]$script:ClockDateEnabled
+        ClockDatePosition = [string]$script:ClockDatePosition
+        ClockDateFormat = [string]$script:ClockDateFormat
+        ClockDateFontSize = [int]$script:ClockDateFontSize
+        ClockDateTextColor = [string]$script:ClockDateTextColor
+        ClockDateTextColorTransparent = [bool]$script:ClockDateTextColorTransparent
+        ClockDateTextOutlineColor = [string]$script:ClockDateTextOutlineColor
+        ClockDateTextOutlineColorTransparent = [bool]$script:ClockDateTextOutlineColorTransparent
+        ClockDateFontFamily = [string]$script:ClockDateFontFamily
         BdoTimeEnabled = [bool]$script:BdoTimeEnabled
         BdoTimeFormat = [string]$script:BdoTimeFormat
         BdoIconType = [string]$script:BdoIconType
@@ -202,6 +226,8 @@ function Get-SettingsPropertyNames {
         "FontSize", "BackgroundOpacity", "BackgroundColor", "BackgroundBorderColor", "BackgroundBorderColorTransparent", "BackgroundBorderThickness", "BackgroundBorderRadius", "TextColor", "TextColorTransparent",
         "TextOutlineColor", "TextOutlineColorTransparent", "FontFamily",
         "TrayIconPath", "TimeFormat", "MeridiemLanguage",
+        "ClockDateEnabled", "ClockDatePosition", "ClockDateFormat", "ClockDateFontSize", "ClockDateTextColor", "ClockDateTextColorTransparent",
+        "ClockDateTextOutlineColor", "ClockDateTextOutlineColorTransparent", "ClockDateFontFamily",
         "BdoTimeEnabled", "BdoTimeFormat", "BdoIconType", "BdoIconEnabled", "BdoFontSize", "BdoTimeOffsetSeconds",
         "BdoTextColor", "BdoTextColorTransparent", "BdoTextOutlineColor", "BdoTextOutlineColorTransparent", "BdoFontFamily",
         "BdoTransitionEnabled", "BdoTransitionFontSize", "BdoTransitionTextColor", "BdoTransitionTextColorTransparent",
@@ -230,6 +256,15 @@ function Get-SettingsSnapshot {
         TrayIconPath = [string]$script:TrayIconPath
         TimeFormat = [string]$script:TimeFormat
         MeridiemLanguage = [string]$script:MeridiemLanguage
+        ClockDateEnabled = [bool]$script:ClockDateEnabled
+        ClockDatePosition = [string]$script:ClockDatePosition
+        ClockDateFormat = [string]$script:ClockDateFormat
+        ClockDateFontSize = [int]$script:ClockDateFontSize
+        ClockDateTextColor = [string]$script:ClockDateTextColor
+        ClockDateTextColorTransparent = [bool]$script:ClockDateTextColorTransparent
+        ClockDateTextOutlineColor = [string]$script:ClockDateTextOutlineColor
+        ClockDateTextOutlineColorTransparent = [bool]$script:ClockDateTextOutlineColorTransparent
+        ClockDateFontFamily = [string]$script:ClockDateFontFamily
         BdoTimeEnabled = [bool]$script:BdoTimeEnabled
         BdoTimeFormat = [string]$script:BdoTimeFormat
         BdoIconType = [string]$script:BdoIconType
@@ -325,6 +360,15 @@ function Set-SettingsVariables {
     $script:TrayIconPath = [string]$Snapshot.TrayIconPath
     $script:TimeFormat = [string]$Snapshot.TimeFormat
     $script:MeridiemLanguage = [string]$Snapshot.MeridiemLanguage
+    $script:ClockDateEnabled = [bool]$Snapshot.ClockDateEnabled
+    $script:ClockDatePosition = if (@("Above", "Below", "Inline") -contains [string]$Snapshot.ClockDatePosition) { [string]$Snapshot.ClockDatePosition } else { "Above" }
+    $script:ClockDateFormat = Get-NormalizedClockDateFormat $Snapshot.ClockDateFormat
+    $script:ClockDateFontSize = [int][Math]::Max(8, [Math]::Min(72, [int]$Snapshot.ClockDateFontSize))
+    $script:ClockDateTextColor = [string]$Snapshot.ClockDateTextColor
+    $script:ClockDateTextColorTransparent = [bool]$Snapshot.ClockDateTextColorTransparent
+    $script:ClockDateTextOutlineColor = [string]$Snapshot.ClockDateTextOutlineColor
+    $script:ClockDateTextOutlineColorTransparent = [bool]$Snapshot.ClockDateTextOutlineColorTransparent
+    $script:ClockDateFontFamily = [string]$Snapshot.ClockDateFontFamily
     $script:BdoTimeEnabled = [bool]$Snapshot.BdoTimeEnabled
     $script:BdoTimeFormat = [string]$Snapshot.BdoTimeFormat
     $script:BdoIconType = [string]$Snapshot.BdoIconType
@@ -503,6 +547,19 @@ function Sync-SettingsControlsFromDraft {
         if ($script:MeridiemLanguagePanel) { $script:MeridiemLanguagePanel.Visibility = if ($draft.TimeFormat -eq "12") { [System.Windows.Visibility]::Visible } else { [System.Windows.Visibility]::Collapsed } }
         if ($script:MeridiemEnglishRadioButton) { $script:MeridiemEnglishRadioButton.IsChecked = ($draft.MeridiemLanguage -ne "ko") }
         if ($script:MeridiemKoreanRadioButton) { $script:MeridiemKoreanRadioButton.IsChecked = ($draft.MeridiemLanguage -eq "ko") }
+        if ($script:ClockDateEnabledCheckBox) { $script:ClockDateEnabledCheckBox.IsChecked = [bool]$draft.ClockDateEnabled }
+        Set-OptionsGroupVisibility $script:ClockDateOptionsExpander $script:ClockDateOptionsPanel ([bool]$draft.ClockDateEnabled)
+        if ($script:ClockDatePositionAboveRadioButton) { $script:ClockDatePositionAboveRadioButton.IsChecked = ($draft.ClockDatePosition -eq "Above") }
+        if ($script:ClockDatePositionBelowRadioButton) { $script:ClockDatePositionBelowRadioButton.IsChecked = ($draft.ClockDatePosition -eq "Below") }
+        if ($script:ClockDatePositionInlineRadioButton) { $script:ClockDatePositionInlineRadioButton.IsChecked = ($draft.ClockDatePosition -eq "Inline") }
+        Sync-ClockDateFormatControls $draft.ClockDateFormat
+        if ($script:ClockDateFontSizeSlider) { $script:ClockDateFontSizeSlider.Value = [double]$draft.ClockDateFontSize }
+        if ($script:ClockDateFontSizeValueText) { $script:ClockDateFontSizeValueText.Text = [string]$draft.ClockDateFontSize }
+        if ($script:ClockDateTextColorText) { $script:ClockDateTextColorText.Text = [string]$draft.ClockDateTextColor }
+        Set-ColorSwatch $script:ClockDateTextColorSwatch $draft.ClockDateTextColor ([bool]$draft.ClockDateTextColorTransparent)
+        if ($script:ClockDateTextOutlineColorText) { $script:ClockDateTextOutlineColorText.Text = [string]$draft.ClockDateTextOutlineColor }
+        Set-ColorSwatch $script:ClockDateTextOutlineColorSwatch $draft.ClockDateTextOutlineColor ([bool]$draft.ClockDateTextOutlineColorTransparent)
+        if ($script:ClockDateFontFamilyText) { Set-FontValueText $script:ClockDateFontFamilyText $draft.ClockDateFontFamily }
         if ($script:FontSizeSlider) { $script:FontSizeSlider.Value = [double]$draft.FontSize }
         if ($script:FontSizeValueText) { $script:FontSizeValueText.Text = [string]$draft.FontSize }
         if ($script:BackgroundOpacityValueText) { $script:BackgroundOpacityValueText.Text = [string]([int][Math]::Round([double]$draft.BackgroundOpacity * 100)) }
@@ -650,6 +707,27 @@ function Sync-SettingsControlsForDraftChange {
             "MeridiemLanguage" {
                 if ($script:MeridiemEnglishRadioButton) { $script:MeridiemEnglishRadioButton.IsChecked = ($draft.MeridiemLanguage -ne "ko") }
                 if ($script:MeridiemKoreanRadioButton) { $script:MeridiemKoreanRadioButton.IsChecked = ($draft.MeridiemLanguage -eq "ko") }
+            }
+            "ClockDateEnabled" {
+                if ($script:ClockDateEnabledCheckBox) { $script:ClockDateEnabledCheckBox.IsChecked = [bool]$draft.ClockDateEnabled }
+                Set-OptionsGroupVisibility $script:ClockDateOptionsExpander $script:ClockDateOptionsPanel ([bool]$draft.ClockDateEnabled)
+            }
+            "ClockDatePosition" {
+                if ($script:ClockDatePositionAboveRadioButton) { $script:ClockDatePositionAboveRadioButton.IsChecked = ($draft.ClockDatePosition -eq "Above") }
+                if ($script:ClockDatePositionBelowRadioButton) { $script:ClockDatePositionBelowRadioButton.IsChecked = ($draft.ClockDatePosition -eq "Below") }
+                if ($script:ClockDatePositionInlineRadioButton) { $script:ClockDatePositionInlineRadioButton.IsChecked = ($draft.ClockDatePosition -eq "Inline") }
+            }
+            "ClockDateFormat" {
+                Sync-ClockDateFormatControls $draft.ClockDateFormat
+            }
+            "ClockDateFontSize" {
+                if ($script:ClockDateFontSizeSlider) { $script:ClockDateFontSizeSlider.Value = [double]$draft.ClockDateFontSize }
+                if ($script:ClockDateFontSizeValueText) { $script:ClockDateFontSizeValueText.Text = [string]$draft.ClockDateFontSize }
+            }
+            "ClockDateTextColor" { Sync-DraftColorControl $draft "ClockDateTextColor" "ClockDateTextColorText" "ClockDateTextColorSwatch" "ClockDateTextColorTransparent" }
+            "ClockDateTextOutlineColor" { Sync-DraftColorControl $draft "ClockDateTextOutlineColor" "ClockDateTextOutlineColorText" "ClockDateTextOutlineColorSwatch" "ClockDateTextOutlineColorTransparent" }
+            "ClockDateFontFamily" {
+                if ($script:ClockDateFontFamilyText) { Set-FontValueText $script:ClockDateFontFamilyText $draft.ClockDateFontFamily }
             }
             "FontSize" {
                 if ($script:FontSizeSlider) { $script:FontSizeSlider.Value = [double]$draft.FontSize }
@@ -1296,6 +1374,8 @@ function Set-ColorSettingByName {
         "BackgroundBorderColor" { Set-BackgroundBorderColor $nextValue }
         "TextColor" { Set-TextColor $nextValue }
         "TextOutlineColor" { Set-TextOutlineColor $nextValue }
+        "ClockDateTextColor" { Set-ClockDateTextColor $nextValue }
+        "ClockDateTextOutlineColor" { Set-ClockDateTextOutlineColor $nextValue }
         "BdoTextColor" { Set-BdoTextColor $nextValue }
         "BdoTextOutlineColor" { Set-BdoTextOutlineColor $nextValue }
         "BdoTransitionTextColor" { Set-BdoTransitionTextColor $nextValue }

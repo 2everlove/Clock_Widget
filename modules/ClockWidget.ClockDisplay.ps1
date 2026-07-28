@@ -83,8 +83,20 @@ function Get-TextOutlineBrush {
     New-ColorBrushOrTransparent $script:TextOutlineColor "#000000" $script:TextOutlineColorTransparent
 }
 
+function Get-ClockDateTextBrush {
+    New-ColorBrushOrTransparent $script:ClockDateTextColor "#FFFFFF" $script:ClockDateTextColorTransparent
+}
+
+function Get-ClockDateTextOutlineBrush {
+    New-ColorBrushOrTransparent $script:ClockDateTextOutlineColor "#000000" $script:ClockDateTextOutlineColorTransparent
+}
+
 function Get-OutlineThickness {
     [double][Math]::Max(1.0, [Math]::Round($script:FontSize * 0.04, 1))
+}
+
+function Get-ClockDateOutlineThickness {
+    [double][Math]::Max(0.75, [Math]::Round($script:ClockDateFontSize * 0.06, 1))
 }
 
 function New-TextOutlinePath {
@@ -170,6 +182,165 @@ function New-ClockTextBlock {
     $block
 }
 
+function New-ClockDateTextBlock {
+    param([System.Windows.Media.Brush]$Brush)
+
+    $block = New-Object System.Windows.Controls.TextBlock
+    $block.Text = "2026/01/01 (목)"
+    $block.FontFamily = New-Object System.Windows.Media.FontFamily $script:ClockDateFontFamily
+    $block.FontSize = [double]$script:ClockDateFontSize
+    $block.FontWeight = [System.Windows.FontWeights]::Bold
+    $block.Foreground = $Brush
+    $block.Margin = New-Object System.Windows.Thickness 0
+    $block.LineHeight = [double]($script:ClockDateFontSize * 1.0)
+    $block.LineStackingStrategy = [System.Windows.LineStackingStrategy]::BlockLineHeight
+    $block.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Center
+    $block.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+    $block
+}
+
+function Get-ClockDateFormatPresets {
+    @(
+        [pscustomobject]@{ Label = "yyyy/MM/dd (ddd)"; Format = "yyyy/MM/dd (ddd)"; IsCustom = $false },
+        [pscustomobject]@{ Label = "yyyy-MM-dd (ddd)"; Format = "yyyy-MM-dd (ddd)"; IsCustom = $false },
+        [pscustomobject]@{ Label = "MM/dd (ddd)"; Format = "MM/dd (ddd)"; IsCustom = $false },
+        [pscustomobject]@{ Label = "yyyy년 M월 d일 (ddd)"; Format = "yyyy년 M월 d일 (ddd)"; IsCustom = $false },
+        [pscustomobject]@{ Label = "사용자 지정"; Format = ""; IsCustom = $true }
+    )
+}
+
+function Get-DefaultClockDateFormat {
+    "yyyy/MM/dd (ddd)"
+}
+
+function Get-NormalizedClockDateFormat {
+    param([object]$Format)
+
+    $value = [string]$Format
+    if ([string]::IsNullOrWhiteSpace($value)) {
+        return Get-DefaultClockDateFormat
+    }
+    $value.Trim()
+}
+
+function ConvertTo-ClockDateDotNetFormat {
+    param([string]$Format)
+
+    $normalized = Get-NormalizedClockDateFormat $Format
+    $withDayTokens = $normalized.Replace("dddd", "{!!}").Replace("ddd", "{!}")
+    $withDayTokens.Replace("/", "'/'")
+}
+
+function Format-ClockDateText {
+    param(
+        [datetime]$Value,
+        [string]$Format
+    )
+
+    $shortDayLabels = @("일", "월", "화", "수", "목", "금", "토")
+    $longDayLabels = @("일요일", "월요일", "화요일", "수요일", "목요일", "금요일", "토요일")
+    $dayIndex = [int]$Value.DayOfWeek
+    $formatForDotNet = ConvertTo-ClockDateDotNetFormat $Format
+    $text = $Value.ToString($formatForDotNet, [System.Globalization.CultureInfo]::InvariantCulture)
+    $text.Replace("{!!}", $longDayLabels[$dayIndex]).Replace("{!}", $shortDayLabels[$dayIndex])
+}
+
+function Test-ClockDateFormat {
+    param([string]$Format)
+
+    try {
+        [void](Format-ClockDateText ([datetime]"2026-01-01 13:34:56") $Format)
+        return $true
+    }
+    catch {
+        return $false
+    }
+}
+
+function Get-ClockDateText {
+    param([datetime]$Value = (Get-Date))
+
+    try {
+        Format-ClockDateText $Value (Get-NormalizedClockDateFormat $script:ClockDateFormat)
+    }
+    catch {
+        Format-ClockDateText $Value (Get-DefaultClockDateFormat)
+    }
+}
+
+function Apply-ClockDateLayout {
+    if (-not $script:ClockTextGrid -or -not $script:ClockDateTextGrid -or -not $script:ClockTimeTextGrid) {
+        return
+    }
+
+    $script:ClockTextGrid.Children.Clear()
+    if ($script:ClockDatePosition -eq "Inline") {
+        $script:ClockTextGrid.Orientation = [System.Windows.Controls.Orientation]::Horizontal
+        if ($script:ClockDateEnabled) {
+            $script:ClockDateTextGrid.Margin = New-Object System.Windows.Thickness 0, 0, 8, 0
+            $script:ClockTextGrid.Children.Add($script:ClockDateTextGrid) | Out-Null
+        }
+        $script:ClockTimeTextGrid.Margin = New-Object System.Windows.Thickness 0
+        $script:ClockTextGrid.Children.Add($script:ClockTimeTextGrid) | Out-Null
+        return
+    }
+
+    $script:ClockTextGrid.Orientation = [System.Windows.Controls.Orientation]::Vertical
+    $script:ClockDateTextGrid.Margin = New-Object System.Windows.Thickness 0
+    $script:ClockTimeTextGrid.Margin = New-Object System.Windows.Thickness 0
+    if ($script:ClockDateEnabled -and $script:ClockDatePosition -eq "Above") {
+        $script:ClockTextGrid.Children.Add($script:ClockDateTextGrid) | Out-Null
+        $script:ClockTextGrid.Children.Add($script:ClockTimeTextGrid) | Out-Null
+    }
+    elseif ($script:ClockDateEnabled -and $script:ClockDatePosition -eq "Below") {
+        $script:ClockTextGrid.Children.Add($script:ClockTimeTextGrid) | Out-Null
+        $script:ClockTextGrid.Children.Add($script:ClockDateTextGrid) | Out-Null
+    }
+    else {
+        $script:ClockTextGrid.Children.Add($script:ClockTimeTextGrid) | Out-Null
+    }
+}
+
+function Apply-ClockDateStyle {
+    if (-not $script:ClockDateTextBlock) {
+        return
+    }
+
+    $fontFamily = New-Object System.Windows.Media.FontFamily $script:ClockDateFontFamily
+    $lineHeight = [double]($script:ClockDateFontSize * 1.0)
+    $outlineBrush = Get-ClockDateTextOutlineBrush
+    $fillBrush = Get-ClockDateTextBrush
+    $outlineThickness = Get-ClockDateOutlineThickness
+
+    if ($script:ClockDateOutlineTextBlocks) {
+        foreach ($item in $script:ClockDateOutlineTextBlocks) {
+            $item.Block.FontFamily = $fontFamily
+            $item.Block.FontSize = [double]$script:ClockDateFontSize
+            $item.Block.LineHeight = $lineHeight
+            $item.Block.Margin = New-Object System.Windows.Thickness 0
+            $item.Block.Foreground = $outlineBrush
+            $item.Block.RenderTransform = New-Object System.Windows.Media.TranslateTransform ($item.X * $outlineThickness), ($item.Y * $outlineThickness)
+            $item.Block.Visibility = if ($script:ClockDateTextColorTransparent -or $script:ClockDateTextOutlineColorTransparent) { [System.Windows.Visibility]::Collapsed } else { [System.Windows.Visibility]::Visible }
+        }
+    }
+
+    if ($script:ClockDateOutlinePath) {
+        Update-TextOutlinePathGeometry $script:ClockDateOutlinePath $script:ClockDateTextBlock.Text $script:ClockDateFontFamily ([double]$script:ClockDateFontSize) (New-Object System.Windows.Thickness 0) ([double]($outlineThickness * 1.8)) $outlineBrush ([bool]($script:ClockDateTextColorTransparent -and -not $script:ClockDateTextOutlineColorTransparent))
+    }
+
+    $script:ClockDateTextBlock.FontFamily = $fontFamily
+    $script:ClockDateTextBlock.FontSize = [double]$script:ClockDateFontSize
+    $script:ClockDateTextBlock.LineHeight = $lineHeight
+    $script:ClockDateTextBlock.Margin = New-Object System.Windows.Thickness 0
+    $script:ClockDateTextBlock.Foreground = $fillBrush
+    $script:ClockDateTextBlock.Visibility = if ($script:ClockDateTextColorTransparent) { [System.Windows.Visibility]::Hidden } else { [System.Windows.Visibility]::Visible }
+
+    if ($script:ClockDateTextGrid) {
+        $script:ClockDateTextGrid.Visibility = if ($script:ClockDateEnabled -and -not ($script:ClockDateTextColorTransparent -and $script:ClockDateTextOutlineColorTransparent)) { [System.Windows.Visibility]::Visible } else { [System.Windows.Visibility]::Collapsed }
+    }
+    Apply-ClockDateLayout
+}
+
 function Apply-ClockTextStyle {
     if (-not $script:TextBlock) {
         return
@@ -206,6 +377,7 @@ function Apply-ClockTextStyle {
     $script:TextBlock.Visibility = if ($script:TextColorTransparent) { [System.Windows.Visibility]::Hidden } else { [System.Windows.Visibility]::Visible }
 
     Apply-BossAlertStyle
+    Apply-ClockDateStyle
 }
 
 function Get-ClockText {
@@ -234,6 +406,19 @@ function Update-ClockText {
             Update-TextOutlinePathGeometry $script:TextOutlinePath $text $script:FontFamily ([double]$script:FontSize) (Get-WidgetPadding $script:FontSize) ([double]((Get-OutlineThickness) * 1.8)) (Get-TextOutlineBrush) ([bool]($script:TextColorTransparent -and -not $script:TextOutlineColorTransparent))
         }
         $script:TextBlock.Text = $text
+    }
+
+    if ($script:ClockDateTextBlock) {
+        $dateText = Get-ClockDateText
+        if ($script:ClockDateOutlineTextBlocks) {
+            foreach ($item in $script:ClockDateOutlineTextBlocks) {
+                $item.Block.Text = $dateText
+            }
+        }
+        if ($script:ClockDateOutlinePath) {
+            Update-TextOutlinePathGeometry $script:ClockDateOutlinePath $dateText $script:ClockDateFontFamily ([double]$script:ClockDateFontSize) (New-Object System.Windows.Thickness 0) ([double]((Get-ClockDateOutlineThickness) * 1.8)) (Get-ClockDateTextOutlineBrush) ([bool]($script:ClockDateTextColorTransparent -and -not $script:ClockDateTextOutlineColorTransparent))
+        }
+        $script:ClockDateTextBlock.Text = $dateText
     }
 
     if ($script:BdoTimeTextBlock) {
@@ -452,6 +637,9 @@ function Set-ColorTransparency {
         { $_ -in @("TextColorTransparent", "TextOutlineColorTransparent") } {
             Apply-ClockTextStyle
         }
+        { $_ -in @("ClockDateTextColorTransparent", "ClockDateTextOutlineColorTransparent") } {
+            Apply-ClockDateStyle
+        }
         "BackgroundBorderColorTransparent" {
             Apply-BackgroundBorderStyle
         }
@@ -536,6 +724,127 @@ function Set-MeridiemLanguage {
     Save-WidgetConfig
 }
 
+function Set-ClockDateEnabled {
+    param([bool]$Value)
+
+    if (Set-SettingsDraftValue "ClockDateEnabled" $Value) {
+        return
+    }
+
+    $script:ClockDateEnabled = $Value
+    Apply-ClockDateStyle
+    Update-ClockText
+    Update-SettingsPreview
+    Save-WidgetConfig
+}
+
+function Set-ClockDatePosition {
+    param([string]$Value)
+
+    $nextValue = if (@("Above", "Below", "Inline") -contains $Value) { $Value } else { "Above" }
+    if (Set-SettingsDraftValue "ClockDatePosition" $nextValue) {
+        return
+    }
+
+    $script:ClockDatePosition = $nextValue
+    Apply-ClockDateLayout
+    Update-SettingsPreview
+    Save-WidgetConfig
+}
+
+function Set-ClockDateFormat {
+    param([string]$Value)
+
+    $nextValue = Get-NormalizedClockDateFormat $Value
+    if (Set-SettingsDraftValue "ClockDateFormat" $nextValue) {
+        return
+    }
+
+    $script:ClockDateFormat = $nextValue
+    Update-ClockText
+    if (Get-Command Update-ClockDateFormatValidation -ErrorAction SilentlyContinue) {
+        Update-ClockDateFormatValidation
+    }
+    Update-SettingsPreview
+    Save-WidgetConfig
+}
+
+function Set-ClockDateFontSize {
+    param([int]$Value)
+
+    $nextValue = [Math]::Max(8, [Math]::Min(72, $Value))
+    if (Set-SettingsDraftValue "ClockDateFontSize" $nextValue) {
+        return
+    }
+
+    $script:ClockDateFontSize = $nextValue
+    Apply-ClockDateStyle
+    if ($script:ClockDateFontSizeSlider) {
+        $script:ClockDateFontSizeSlider.Value = [double]$script:ClockDateFontSize
+    }
+    if ($script:ClockDateFontSizeValueText) {
+        $script:ClockDateFontSizeValueText.Text = [string]$script:ClockDateFontSize
+    }
+    Update-SettingsPreview
+    Save-WidgetConfig
+}
+
+function Set-ClockDateTextColor {
+    param([string]$Value)
+
+    if (Set-SettingsDraftValue "ClockDateTextColor" $Value) {
+        return
+    }
+
+    $script:ClockDateTextColor = $Value
+    Apply-ClockDateStyle
+    if ($script:ClockDateTextColorText) {
+        $script:ClockDateTextColorText.Text = $script:ClockDateTextColor
+    }
+    Set-ColorSwatch $script:ClockDateTextColorSwatch $script:ClockDateTextColor $script:ClockDateTextColorTransparent
+    Sync-TransparentColorControls
+    Update-SettingsPreview
+    Save-WidgetConfig
+}
+
+function Set-ClockDateTextOutlineColor {
+    param([string]$Value)
+
+    if (Set-SettingsDraftValue "ClockDateTextOutlineColor" $Value) {
+        return
+    }
+
+    $script:ClockDateTextOutlineColor = $Value
+    Apply-ClockDateStyle
+    if ($script:ClockDateTextOutlineColorText) {
+        $script:ClockDateTextOutlineColorText.Text = $script:ClockDateTextOutlineColor
+    }
+    Set-ColorSwatch $script:ClockDateTextOutlineColorSwatch $script:ClockDateTextOutlineColor $script:ClockDateTextOutlineColorTransparent
+    Sync-TransparentColorControls
+    Update-SettingsPreview
+    Save-WidgetConfig
+}
+
+function Set-ClockDateFontFamily {
+    param([string]$Value)
+
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return
+    }
+
+    if (Set-SettingsDraftValue "ClockDateFontFamily" $Value) {
+        return
+    }
+
+    $script:ClockDateFontFamily = $Value
+    Apply-ClockDateStyle
+    if ($script:ClockDateFontFamilyText) {
+        Set-FontValueText $script:ClockDateFontFamilyText $script:ClockDateFontFamily
+    }
+    Update-SettingsPreview
+    Save-WidgetConfig
+}
+
 function Show-BackgroundColorDialog {
     $dialog = New-Object System.Windows.Forms.ColorDialog
     $dialog.AllowFullOpen = $true
@@ -590,6 +899,41 @@ function Show-FontDialog {
     if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
         Set-FontFamily $dialog.Font.FontFamily.Name
         Set-WidgetFontSize ([int][Math]::Round($dialog.Font.SizeInPoints))
+    }
+}
+
+function Show-ClockDateTextColorDialog {
+    $dialog = New-Object System.Windows.Forms.ColorDialog
+    $dialog.AllowFullOpen = $true
+    $dialog.FullOpen = $true
+    $dialog.Color = ConvertTo-DrawingColor (Get-DialogSettingValue "ClockDateTextColor" $script:ClockDateTextColor) "#FFFFFF"
+
+    if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+        Set-ClockDateTextColor (ConvertTo-HexColor $dialog.Color)
+    }
+}
+
+function Show-ClockDateTextOutlineColorDialog {
+    $dialog = New-Object System.Windows.Forms.ColorDialog
+    $dialog.AllowFullOpen = $true
+    $dialog.FullOpen = $true
+    $dialog.Color = ConvertTo-DrawingColor (Get-DialogSettingValue "ClockDateTextOutlineColor" $script:ClockDateTextOutlineColor) "#000000"
+
+    if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+        Set-ClockDateTextOutlineColor (ConvertTo-HexColor $dialog.Color)
+    }
+}
+
+function Show-ClockDateFontDialog {
+    $dialog = New-Object System.Windows.Forms.FontDialog
+    $dialog.ShowColor = $false
+    $dialog.ShowEffects = $false
+    $dialog.FontMustExist = $true
+    $dialog.Font = New-Object System.Drawing.Font (Get-DialogSettingValue "ClockDateFontFamily" $script:ClockDateFontFamily), ([float](Get-DialogSettingValue "ClockDateFontSize" $script:ClockDateFontSize)), ([System.Drawing.FontStyle]::Bold)
+
+    if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+        Set-ClockDateFontFamily $dialog.Font.FontFamily.Name
+        Set-ClockDateFontSize ([int][Math]::Round($dialog.Font.SizeInPoints))
     }
 }
 

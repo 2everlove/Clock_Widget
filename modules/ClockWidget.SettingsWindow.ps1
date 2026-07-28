@@ -16,6 +16,7 @@ function Update-SettingsPreview {
     }
 
     $previewTime = Get-ClockText ([datetime]"2026-01-01 13:34:56")
+    $previewDate = Get-ClockDateText ([datetime]"2026-01-01 13:34:56")
 
     if ($script:ColorPreviewBackground) {
         $script:ColorPreviewBackground.Background = Get-PreviewBackgroundBrush $script:BackgroundOpacity
@@ -55,6 +56,37 @@ function Update-SettingsPreview {
         $script:ColorPreviewText.Margin = $previewPadding
         $script:ColorPreviewText.Visibility = if ($script:TextColorTransparent) { [System.Windows.Visibility]::Hidden } else { [System.Windows.Visibility]::Visible }
         $script:ColorPreviewText.Effect = $null
+    }
+    if ($script:ClockDatePreviewText) {
+        $datePreviewFontSize = [double][Math]::Max(8, [Math]::Min(32, $script:ClockDateFontSize))
+        $datePreviewLineHeight = [double]($datePreviewFontSize * 1.0)
+        $datePreviewOutlineThickness = [double][Math]::Max(0.75, [Math]::Round($datePreviewFontSize * 0.06, 1))
+        $datePreviewFontFamily = New-Object System.Windows.Media.FontFamily $script:ClockDateFontFamily
+
+        if ($script:ClockDatePreviewOutlineTextBlocks) {
+            foreach ($item in $script:ClockDatePreviewOutlineTextBlocks) {
+                $item.Block.Text = $previewDate
+                $item.Block.FontFamily = $datePreviewFontFamily
+                $item.Block.FontSize = $datePreviewFontSize
+                $item.Block.LineHeight = $datePreviewLineHeight
+                $item.Block.Margin = New-Object System.Windows.Thickness 0
+                $item.Block.Foreground = Get-ClockDateTextOutlineBrush
+                $item.Block.RenderTransform = New-Object System.Windows.Media.TranslateTransform ($item.X * $datePreviewOutlineThickness), ($item.Y * $datePreviewOutlineThickness)
+                $item.Block.Visibility = if ($script:ClockDateTextColorTransparent -or $script:ClockDateTextOutlineColorTransparent) { [System.Windows.Visibility]::Collapsed } else { [System.Windows.Visibility]::Visible }
+            }
+        }
+        if ($script:ClockDatePreviewOutlinePath) {
+            Update-TextOutlinePathGeometry $script:ClockDatePreviewOutlinePath $previewDate $script:ClockDateFontFamily $datePreviewFontSize (New-Object System.Windows.Thickness 0) ([double]($datePreviewOutlineThickness * 1.8)) (Get-ClockDateTextOutlineBrush) ([bool]($script:ClockDateTextColorTransparent -and -not $script:ClockDateTextOutlineColorTransparent))
+        }
+
+        $script:ClockDatePreviewText.Foreground = Get-ClockDateTextBrush
+        $script:ClockDatePreviewText.FontFamily = $datePreviewFontFamily
+        $script:ClockDatePreviewText.Text = $previewDate
+        $script:ClockDatePreviewText.FontSize = $datePreviewFontSize
+        $script:ClockDatePreviewText.LineHeight = $datePreviewLineHeight
+        $script:ClockDatePreviewText.Margin = New-Object System.Windows.Thickness 0
+        $script:ClockDatePreviewText.Visibility = if ($script:ClockDateTextColorTransparent) { [System.Windows.Visibility]::Hidden } else { [System.Windows.Visibility]::Visible }
+        $script:ClockDatePreviewText.Effect = $null
     }
 
     if ($script:BdoPreviewPanel) {
@@ -166,6 +198,109 @@ function Update-SettingsPreview {
         }
     }
     Apply-SettingsPreviewSectionOrder
+    Apply-ClockDatePreviewLayout
+}
+
+function Apply-ClockDatePreviewLayout {
+    if (-not $script:ClockPreviewPanel -or -not $script:ClockPreviewTimeGrid -or -not $script:ClockDatePreviewGrid) {
+        return
+    }
+
+    $script:ClockPreviewPanel.Children.Clear()
+    if ($script:ClockDatePosition -eq "Inline") {
+        $script:ClockPreviewPanel.Orientation = [System.Windows.Controls.Orientation]::Horizontal
+        if ($script:ClockDateEnabled) {
+            $script:ClockDatePreviewGrid.Margin = New-Object System.Windows.Thickness 0, 0, 8, 0
+            $script:ClockPreviewPanel.Children.Add($script:ClockDatePreviewGrid) | Out-Null
+        }
+        $script:ClockPreviewTimeGrid.Margin = New-Object System.Windows.Thickness 0
+        $script:ClockPreviewPanel.Children.Add($script:ClockPreviewTimeGrid) | Out-Null
+        return
+    }
+
+    $script:ClockPreviewPanel.Orientation = [System.Windows.Controls.Orientation]::Vertical
+    $script:ClockDatePreviewGrid.Margin = New-Object System.Windows.Thickness 0
+    $script:ClockPreviewTimeGrid.Margin = New-Object System.Windows.Thickness 0
+    if ($script:ClockDateEnabled -and $script:ClockDatePosition -eq "Above") {
+        $script:ClockPreviewPanel.Children.Add($script:ClockDatePreviewGrid) | Out-Null
+        $script:ClockPreviewPanel.Children.Add($script:ClockPreviewTimeGrid) | Out-Null
+    }
+    elseif ($script:ClockDateEnabled -and $script:ClockDatePosition -eq "Below") {
+        $script:ClockPreviewPanel.Children.Add($script:ClockPreviewTimeGrid) | Out-Null
+        $script:ClockPreviewPanel.Children.Add($script:ClockDatePreviewGrid) | Out-Null
+    }
+    else {
+        $script:ClockPreviewPanel.Children.Add($script:ClockPreviewTimeGrid) | Out-Null
+    }
+
+    $script:ClockDatePreviewGrid.Visibility = if ($script:ClockDateEnabled -and -not ($script:ClockDateTextColorTransparent -and $script:ClockDateTextOutlineColorTransparent)) { [System.Windows.Visibility]::Visible } else { [System.Windows.Visibility]::Collapsed }
+}
+
+function Test-ClockDateFormatPreset {
+    param([string]$Format)
+
+    $normalized = Get-NormalizedClockDateFormat $Format
+    foreach ($preset in (Get-ClockDateFormatPresets)) {
+        if (-not $preset.IsCustom -and $preset.Format -eq $normalized) {
+            return $true
+        }
+    }
+    return $false
+}
+
+function Update-ClockDateCustomFormatVisibility {
+    if (-not $script:ClockDateCustomFormatPanel) {
+        return
+    }
+
+    $isCustom = $false
+    if ($script:ClockDateFormatComboBox -and $script:ClockDateFormatComboBox.SelectedItem) {
+        $isCustom = ([string]$script:ClockDateFormatComboBox.SelectedItem.Tag -eq "__custom")
+    }
+    elseif (-not (Test-ClockDateFormatPreset $script:ClockDateFormat)) {
+        $isCustom = $true
+    }
+
+    $script:ClockDateCustomFormatPanel.Visibility = if ($isCustom) { [System.Windows.Visibility]::Visible } else { [System.Windows.Visibility]::Collapsed }
+}
+
+function Update-ClockDateFormatValidation {
+    if (-not $script:ClockDateFormatErrorText) {
+        return
+    }
+
+    $format = if ($script:ClockDateCustomFormatTextBox) { [string]$script:ClockDateCustomFormatTextBox.Text } else { [string]$script:ClockDateFormat }
+    $isCustom = $false
+    if ($script:ClockDateFormatComboBox -and $script:ClockDateFormatComboBox.SelectedItem) {
+        $isCustom = ([string]$script:ClockDateFormatComboBox.SelectedItem.Tag -eq "__custom")
+    }
+    $script:ClockDateFormatErrorText.Visibility = if ($isCustom -and -not (Test-ClockDateFormat $format)) { [System.Windows.Visibility]::Visible } else { [System.Windows.Visibility]::Collapsed }
+}
+
+function Sync-ClockDateFormatControls {
+    param([object]$Format)
+
+    $formatValue = Get-NormalizedClockDateFormat $Format
+    $isPreset = Test-ClockDateFormatPreset $formatValue
+
+    if ($script:ClockDateFormatComboBox) {
+        $targetTag = if ($isPreset) { $formatValue } else { "__custom" }
+        foreach ($item in $script:ClockDateFormatComboBox.Items) {
+            if ([string]$item.Tag -eq $targetTag) {
+                if ($script:ClockDateFormatComboBox.SelectedItem -ne $item) {
+                    $script:ClockDateFormatComboBox.SelectedItem = $item
+                }
+                break
+            }
+        }
+    }
+
+    if ($script:ClockDateCustomFormatTextBox -and $script:ClockDateCustomFormatTextBox.Text -ne $formatValue) {
+        $script:ClockDateCustomFormatTextBox.Text = $formatValue
+    }
+
+    Update-ClockDateCustomFormatVisibility
+    Update-ClockDateFormatValidation
 }
 
 function Get-SettingsPreviewSectionContainer {
@@ -366,12 +501,15 @@ function Apply-PendingSettingsInputs {
     $bossAfterMinutesText = if ($script:BossAfterMinutesTextBox) { [string]$script:BossAfterMinutesTextBox.Text } else { $null }
     $bossAfterSecondsText = if ($script:BossAfterSecondsTextBox) { [string]$script:BossAfterSecondsTextBox.Text } else { $null }
     $bossHighlightAnimationText = if ($script:BossHighlightAnimationTextBox) { [string]$script:BossHighlightAnimationTextBox.Text } else { $null }
+    $clockDateCustomFormatText = if ($script:ClockDateCustomFormatTextBox) { [string]$script:ClockDateCustomFormatTextBox.Text } else { $null }
 
     $colorInputs = @(
         [pscustomobject]@{ Name = "BackgroundColor"; Value = if ($script:BackgroundColorText) { [string]$script:BackgroundColorText.Text } else { $null } },
         [pscustomobject]@{ Name = "BackgroundBorderColor"; Value = if ($script:BackgroundBorderColorText) { [string]$script:BackgroundBorderColorText.Text } else { $null } },
         [pscustomobject]@{ Name = "TextColor"; Value = if ($script:TextColorText) { [string]$script:TextColorText.Text } else { $null } },
         [pscustomobject]@{ Name = "TextOutlineColor"; Value = if ($script:TextOutlineColorText) { [string]$script:TextOutlineColorText.Text } else { $null } },
+        [pscustomobject]@{ Name = "ClockDateTextColor"; Value = if ($script:ClockDateTextColorText) { [string]$script:ClockDateTextColorText.Text } else { $null } },
+        [pscustomobject]@{ Name = "ClockDateTextOutlineColor"; Value = if ($script:ClockDateTextOutlineColorText) { [string]$script:ClockDateTextOutlineColorText.Text } else { $null } },
         [pscustomobject]@{ Name = "BdoTextColor"; Value = if ($script:BdoTextColorText) { [string]$script:BdoTextColorText.Text } else { $null } },
         [pscustomobject]@{ Name = "BdoTextOutlineColor"; Value = if ($script:BdoTextOutlineColorText) { [string]$script:BdoTextOutlineColorText.Text } else { $null } },
         [pscustomobject]@{ Name = "BdoTransitionTextColor"; Value = if ($script:BdoTransitionTextColorText) { [string]$script:BdoTransitionTextColorText.Text } else { $null } },
@@ -404,6 +542,9 @@ function Apply-PendingSettingsInputs {
         [double]$seconds = $script:BossHighlightAnimationSeconds
         [void][double]::TryParse($bossHighlightAnimationText, [System.Globalization.NumberStyles]::Float, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$seconds)
         Set-BossHighlightAnimationSeconds $seconds
+    }
+    if ($null -ne $clockDateCustomFormatText -and $script:ClockDateFormatComboBox -and $script:ClockDateFormatComboBox.SelectedItem -and [string]$script:ClockDateFormatComboBox.SelectedItem.Tag -eq "__custom") {
+        Set-ClockDateFormat $clockDateCustomFormatText
     }
 
     foreach ($item in $colorInputs) {
@@ -448,6 +589,8 @@ function Sync-TransparentColorControls {
         @("BackgroundBorderColorTransparent", "BackgroundBorderColorTransparentCheckBox", "BackgroundBorderColorSwatch", "BackgroundBorderColor"),
         @("TextColorTransparent", "TextColorTransparentCheckBox", "TextColorSwatch", "TextColor"),
         @("TextOutlineColorTransparent", "TextOutlineColorTransparentCheckBox", "TextOutlineColorSwatch", "TextOutlineColor"),
+        @("ClockDateTextColorTransparent", "ClockDateTextColorTransparentCheckBox", "ClockDateTextColorSwatch", "ClockDateTextColor"),
+        @("ClockDateTextOutlineColorTransparent", "ClockDateTextOutlineColorTransparentCheckBox", "ClockDateTextOutlineColorSwatch", "ClockDateTextOutlineColor"),
         @("BdoTextColorTransparent", "BdoTextColorTransparentCheckBox", "BdoTextColorSwatch", "BdoTextColor"),
         @("BdoTextOutlineColorTransparent", "BdoTextOutlineColorTransparentCheckBox", "BdoTextOutlineColorSwatch", "BdoTextOutlineColor"),
         @("BdoTransitionTextColorTransparent", "BdoTransitionTextColorTransparentCheckBox", "BdoTransitionTextColorSwatch", "BdoTransitionTextColor"),
@@ -1234,6 +1377,142 @@ function Show-SettingsWindow {
     }
     $panel.Children.Add($script:MeridiemLanguagePanel) | Out-Null
 
+    $script:ClockDateEnabledCheckBox = New-Object System.Windows.Controls.CheckBox
+    $script:ClockDateEnabledCheckBox.Content = "실제 날짜 표시"
+    $script:ClockDateEnabledCheckBox.IsChecked = [bool]$script:ClockDateEnabled
+    $script:ClockDateEnabledCheckBox.Margin = New-Object System.Windows.Thickness 0, 0, 0, 8
+    $script:ClockDateEnabledCheckBox.Add_Click({
+        param($sender, $eventArgs)
+        Set-ClockDateEnabled ([bool]$sender.IsChecked)
+    })
+    $panel.Children.Add($script:ClockDateEnabledCheckBox) | Out-Null
+
+    $script:ClockDateOptionsPanel = New-Object System.Windows.Controls.StackPanel
+
+    $datePositionPanel = New-Object System.Windows.Controls.StackPanel
+    $datePositionPanel.Orientation = [System.Windows.Controls.Orientation]::Horizontal
+    $datePositionPanel.Margin = New-Object System.Windows.Thickness 0, 0, 0, 8
+
+    $script:ClockDatePositionAboveRadioButton = New-Object System.Windows.Controls.RadioButton
+    $script:ClockDatePositionAboveRadioButton.Content = "시간 위"
+    $script:ClockDatePositionAboveRadioButton.GroupName = "ClockDatePosition"
+    $script:ClockDatePositionAboveRadioButton.Margin = New-Object System.Windows.Thickness 0, 0, 18, 0
+    $script:ClockDatePositionAboveRadioButton.IsChecked = ($script:ClockDatePosition -eq "Above")
+    $script:ClockDatePositionAboveRadioButton.Add_Checked({ Set-ClockDatePosition "Above" })
+    $datePositionPanel.Children.Add($script:ClockDatePositionAboveRadioButton) | Out-Null
+
+    $script:ClockDatePositionBelowRadioButton = New-Object System.Windows.Controls.RadioButton
+    $script:ClockDatePositionBelowRadioButton.Content = "시간 아래"
+    $script:ClockDatePositionBelowRadioButton.GroupName = "ClockDatePosition"
+    $script:ClockDatePositionBelowRadioButton.Margin = New-Object System.Windows.Thickness 0, 0, 18, 0
+    $script:ClockDatePositionBelowRadioButton.IsChecked = ($script:ClockDatePosition -eq "Below")
+    $script:ClockDatePositionBelowRadioButton.Add_Checked({ Set-ClockDatePosition "Below" })
+    $datePositionPanel.Children.Add($script:ClockDatePositionBelowRadioButton) | Out-Null
+
+    $script:ClockDatePositionInlineRadioButton = New-Object System.Windows.Controls.RadioButton
+    $script:ClockDatePositionInlineRadioButton.Content = "같은 행"
+    $script:ClockDatePositionInlineRadioButton.GroupName = "ClockDatePosition"
+    $script:ClockDatePositionInlineRadioButton.IsChecked = ($script:ClockDatePosition -eq "Inline")
+    $script:ClockDatePositionInlineRadioButton.Add_Checked({ Set-ClockDatePosition "Inline" })
+    $datePositionPanel.Children.Add($script:ClockDatePositionInlineRadioButton) | Out-Null
+    $script:ClockDateOptionsPanel.Children.Add((New-SettingsRow "실제 날짜 위치" $datePositionPanel)) | Out-Null
+
+    $clockDateFormatPanel = New-Object System.Windows.Controls.StackPanel
+    $script:ClockDateFormatComboBox = New-Object System.Windows.Controls.ComboBox
+    $script:ClockDateFormatComboBox.Width = 220
+    $script:ClockDateFormatComboBox.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Left
+    foreach ($preset in (Get-ClockDateFormatPresets)) {
+        $item = New-Object System.Windows.Controls.ComboBoxItem
+        $item.Content = $preset.Label
+        $item.Tag = if ($preset.IsCustom) { "__custom" } else { $preset.Format }
+        $script:ClockDateFormatComboBox.Items.Add($item) | Out-Null
+    }
+    $script:ClockDateFormatComboBox.Add_SelectionChanged({
+        param($sender, $eventArgs)
+        if ($script:SyncingSettingsControls -or -not $sender.SelectedItem) {
+            return
+        }
+
+        $selectedTag = [string]$sender.SelectedItem.Tag
+        if ($selectedTag -eq "__custom") {
+            Update-ClockDateCustomFormatVisibility
+            Update-ClockDateFormatValidation
+            return
+        }
+
+        Set-ClockDateFormat $selectedTag
+    })
+    $clockDateFormatPanel.Children.Add($script:ClockDateFormatComboBox) | Out-Null
+
+    $script:ClockDateCustomFormatPanel = New-Object System.Windows.Controls.StackPanel
+    $script:ClockDateCustomFormatPanel.Margin = New-Object System.Windows.Thickness 0, 6, 0, 0
+    $script:ClockDateCustomFormatTextBox = New-Object System.Windows.Controls.TextBox
+    $script:ClockDateCustomFormatTextBox.Width = 260
+    $script:ClockDateCustomFormatTextBox.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Left
+    $script:ClockDateCustomFormatTextBox.Text = Get-NormalizedClockDateFormat $script:ClockDateFormat
+    $script:ClockDateCustomFormatTextBox.Add_TextChanged({
+        param($sender, $eventArgs)
+        if ($script:SyncingSettingsControls) {
+            return
+        }
+        if ($script:ClockDateFormatComboBox -and $script:ClockDateFormatComboBox.SelectedItem -and [string]$script:ClockDateFormatComboBox.SelectedItem.Tag -eq "__custom") {
+            Set-ClockDateFormat ([string]$sender.Text)
+        }
+        Update-ClockDateFormatValidation
+    })
+    $script:ClockDateCustomFormatPanel.Children.Add($script:ClockDateCustomFormatTextBox) | Out-Null
+
+    $clockDateFormatHint = New-Object System.Windows.Controls.TextBlock
+    $clockDateFormatHint.Text = "예: yyyy/MM/dd (ddd), yyyy년 M월 d일 dddd"
+    $clockDateFormatHint.FontSize = 11
+    $clockDateFormatHint.Foreground = [System.Windows.Media.Brushes]::DimGray
+    $clockDateFormatHint.Margin = New-Object System.Windows.Thickness 0, 3, 0, 0
+    $script:ClockDateCustomFormatPanel.Children.Add($clockDateFormatHint) | Out-Null
+
+    $script:ClockDateFormatErrorText = New-Object System.Windows.Controls.TextBlock
+    $script:ClockDateFormatErrorText.Text = "날짜 형식이 올바르지 않습니다."
+    $script:ClockDateFormatErrorText.FontSize = 11
+    $script:ClockDateFormatErrorText.Foreground = [System.Windows.Media.Brushes]::Red
+    $script:ClockDateFormatErrorText.Margin = New-Object System.Windows.Thickness 0, 3, 0, 0
+    $script:ClockDateFormatErrorText.Visibility = [System.Windows.Visibility]::Collapsed
+    $script:ClockDateCustomFormatPanel.Children.Add($script:ClockDateFormatErrorText) | Out-Null
+
+    $clockDateFormatPanel.Children.Add($script:ClockDateCustomFormatPanel) | Out-Null
+    $script:ClockDateOptionsPanel.Children.Add((New-SettingsRow "실제 날짜 형식" $clockDateFormatPanel)) | Out-Null
+
+    $clockDateFontLabel = New-Object System.Windows.Controls.TextBlock
+    $clockDateFontLabel.Text = "실제 날짜 글자 크기"
+    $script:ClockDateOptionsPanel.Children.Add($clockDateFontLabel) | Out-Null
+
+    $script:ClockDateFontSizeSlider = New-Object System.Windows.Controls.Slider
+    $script:ClockDateFontSizeSlider.Minimum = 8
+    $script:ClockDateFontSizeSlider.Maximum = 72
+    $script:ClockDateFontSizeSlider.Value = [double]$script:ClockDateFontSize
+    $script:ClockDateFontSizeSlider.TickFrequency = 2
+    $script:ClockDateFontSizeSlider.IsSnapToTickEnabled = $true
+    $script:ClockDateFontSizeSlider.Add_ValueChanged({
+        param($sender, $eventArgs)
+        Set-ClockDateFontSize ([int]$sender.Value)
+    })
+    $script:ClockDateFontSizeValueText = New-Object System.Windows.Controls.TextBlock
+    $script:ClockDateFontSizeValueText.Text = [string]$script:ClockDateFontSize
+    $script:ClockDateOptionsPanel.Children.Add((New-SliderRow $script:ClockDateFontSizeSlider $script:ClockDateFontSizeValueText)) | Out-Null
+
+    $script:ClockDateTextColorText = New-Object System.Windows.Controls.TextBox
+    $script:ClockDateTextColorText.Text = $script:ClockDateTextColor
+    $script:ClockDateOptionsPanel.Children.Add((New-SettingsRow "실제 날짜 채움색" (New-ColorValueControl $script:ClockDateTextColorText $script:ClockDateTextColor "ClockDateTextColorSwatch" "ClockDateTextColor" { Show-ClockDateTextColorDialog } "ClockDateTextColorTransparent" "ClockDateTextColorTransparentCheckBox"))) | Out-Null
+
+    $script:ClockDateTextOutlineColorText = New-Object System.Windows.Controls.TextBox
+    $script:ClockDateTextOutlineColorText.Text = $script:ClockDateTextOutlineColor
+    $script:ClockDateOptionsPanel.Children.Add((New-SettingsRow "실제 날짜 테두리색" (New-ColorValueControl $script:ClockDateTextOutlineColorText $script:ClockDateTextOutlineColor "ClockDateTextOutlineColorSwatch" "ClockDateTextOutlineColor" { Show-ClockDateTextOutlineColorDialog } "ClockDateTextOutlineColorTransparent" "ClockDateTextOutlineColorTransparentCheckBox"))) | Out-Null
+
+    $script:ClockDateFontFamilyText = New-Object System.Windows.Controls.TextBlock
+    Set-FontValueText $script:ClockDateFontFamilyText $script:ClockDateFontFamily
+    $script:ClockDateOptionsPanel.Children.Add((New-SettingsRow "실제 날짜 글꼴" $script:ClockDateFontFamilyText { Show-ClockDateFontDialog })) | Out-Null
+
+    $script:ClockDateOptionsExpander = New-SettingsExpander "실제 날짜 상세 설정" $script:ClockDateOptionsPanel ([bool]$script:ClockDateEnabled)
+    $panel.Children.Add($script:ClockDateOptionsExpander) | Out-Null
+
     $fontLabel = New-Object System.Windows.Controls.TextBlock
     $fontLabel.Text = "글자 크기"
     $panel.Children.Add($fontLabel) | Out-Null
@@ -1467,17 +1746,58 @@ function Show-SettingsWindow {
     $script:BossPreviewHostPanel.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
     $script:BossPreviewContainer = New-PreviewSectionContainer "BossAlert" "보스 알림" $script:BossPreviewHostPanel
 
-    $colorPreviewTextGrid = New-Object System.Windows.Controls.Grid
-    $colorPreviewTextGrid.Background = [System.Windows.Media.Brushes]::Transparent
-    $colorPreviewTextGrid.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Center
-    $colorPreviewTextGrid.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
-
-    $script:ColorPreviewOutlineTextBlocks = @()
     $previewOutlineOffsets = @(
         @(-1, -1), @(0, -1), @(1, -1),
         @(-1, 0),           @(1, 0),
         @(-1, 1),  @(0, 1),  @(1, 1)
     )
+
+    $script:ClockPreviewPanel = New-Object System.Windows.Controls.StackPanel
+    $script:ClockPreviewPanel.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Center
+    $script:ClockPreviewPanel.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+
+    $script:ClockDatePreviewGrid = New-Object System.Windows.Controls.Grid
+    $script:ClockDatePreviewGrid.Background = [System.Windows.Media.Brushes]::Transparent
+    $script:ClockDatePreviewGrid.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Center
+    $script:ClockDatePreviewGrid.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+
+    $script:ClockDatePreviewOutlineTextBlocks = @()
+    foreach ($offset in $previewOutlineOffsets) {
+        $outlinePreviewText = New-Object System.Windows.Controls.TextBlock
+        $outlinePreviewText.Text = "2026/01/01 (목)"
+        $outlinePreviewText.FontSize = 14
+        $outlinePreviewText.FontWeight = [System.Windows.FontWeights]::Bold
+        $outlinePreviewText.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Center
+        $outlinePreviewText.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+        $outlinePreviewText.LineStackingStrategy = [System.Windows.LineStackingStrategy]::BlockLineHeight
+        $outlinePreviewText.IsHitTestVisible = $false
+        $script:ClockDatePreviewOutlineTextBlocks += [pscustomobject]@{
+            Block = $outlinePreviewText
+            X = [double]$offset[0]
+            Y = [double]$offset[1]
+        }
+        $script:ClockDatePreviewGrid.Children.Add($outlinePreviewText) | Out-Null
+    }
+
+    $script:ClockDatePreviewOutlinePath = New-TextOutlinePath
+    $script:ClockDatePreviewGrid.Children.Add($script:ClockDatePreviewOutlinePath) | Out-Null
+
+    $script:ClockDatePreviewText = New-Object System.Windows.Controls.TextBlock
+    $script:ClockDatePreviewText.Text = "2026/01/01 (목)"
+    $script:ClockDatePreviewText.FontSize = 14
+    $script:ClockDatePreviewText.FontWeight = [System.Windows.FontWeights]::Bold
+    $script:ClockDatePreviewText.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Center
+    $script:ClockDatePreviewText.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+    $script:ClockDatePreviewText.LineStackingStrategy = [System.Windows.LineStackingStrategy]::BlockLineHeight
+    $script:ClockDatePreviewGrid.Children.Add($script:ClockDatePreviewText) | Out-Null
+
+    $colorPreviewTextGrid = New-Object System.Windows.Controls.Grid
+    $script:ClockPreviewTimeGrid = $colorPreviewTextGrid
+    $colorPreviewTextGrid.Background = [System.Windows.Media.Brushes]::Transparent
+    $colorPreviewTextGrid.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Center
+    $colorPreviewTextGrid.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+
+    $script:ColorPreviewOutlineTextBlocks = @()
     foreach ($offset in $previewOutlineOffsets) {
         $outlinePreviewText = New-Object System.Windows.Controls.TextBlock
         $outlinePreviewText.Text = "12:34:56"
@@ -1506,7 +1826,7 @@ function Show-SettingsWindow {
     $script:ColorPreviewText.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
     $script:ColorPreviewText.LineStackingStrategy = [System.Windows.LineStackingStrategy]::BlockLineHeight
     $colorPreviewTextGrid.Children.Add($script:ColorPreviewText) | Out-Null
-    $script:ClockPreviewContainer = New-PreviewSectionContainer "Clock" "실제 시간" $colorPreviewTextGrid
+    $script:ClockPreviewContainer = New-PreviewSectionContainer "Clock" "실제 시간" $script:ClockPreviewPanel
     Apply-SettingsPreviewSectionOrder
     $script:ColorPreviewBackground.Child = $script:SettingsPreviewStack
     $previewHostPanel.Children.Add($script:ColorPreviewBackground) | Out-Null
@@ -1657,6 +1977,25 @@ function Show-SettingsWindow {
         $script:MeridiemLanguagePanel = $null
         $script:MeridiemEnglishRadioButton = $null
         $script:MeridiemKoreanRadioButton = $null
+        $script:ClockDateEnabledCheckBox = $null
+        $script:ClockDateOptionsExpander = $null
+        $script:ClockDateOptionsPanel = $null
+        $script:ClockDatePositionAboveRadioButton = $null
+        $script:ClockDatePositionBelowRadioButton = $null
+        $script:ClockDatePositionInlineRadioButton = $null
+        $script:ClockDateFormatComboBox = $null
+        $script:ClockDateCustomFormatPanel = $null
+        $script:ClockDateCustomFormatTextBox = $null
+        $script:ClockDateFormatErrorText = $null
+        $script:ClockDateFontSizeSlider = $null
+        $script:ClockDateFontSizeValueText = $null
+        $script:ClockDateTextColorText = $null
+        $script:ClockDateTextColorSwatch = $null
+        $script:ClockDateTextColorTransparentCheckBox = $null
+        $script:ClockDateTextOutlineColorText = $null
+        $script:ClockDateTextOutlineColorSwatch = $null
+        $script:ClockDateTextOutlineColorTransparentCheckBox = $null
+        $script:ClockDateFontFamilyText = $null
         $script:FontSizeSlider = $null
         $script:FontSizeValueText = $null
         $script:BackgroundOpacityValueText = $null
@@ -1682,6 +2021,12 @@ function Show-SettingsWindow {
         $script:ColorPreviewOutlineTextBlocks = $null
         $script:ColorPreviewOutlinePath = $null
         $script:ColorPreviewText = $null
+        $script:ClockPreviewPanel = $null
+        $script:ClockPreviewTimeGrid = $null
+        $script:ClockDatePreviewGrid = $null
+        $script:ClockDatePreviewOutlineTextBlocks = $null
+        $script:ClockDatePreviewOutlinePath = $null
+        $script:ClockDatePreviewText = $null
         $script:SettingsPreviewStack = $null
         $script:BdoPreviewContainer = $null
         $script:BdoPreviewPanel = $null

@@ -82,6 +82,15 @@ $script:FontFamily = [string]$config.FontFamily
 $script:TrayIconPath = [string]$config.TrayIconPath
 $script:TimeFormat = [string]$config.TimeFormat
 $script:MeridiemLanguage = [string]$config.MeridiemLanguage
+$script:ClockDateEnabled = [bool]$config.ClockDateEnabled
+$script:ClockDatePosition = [string]$config.ClockDatePosition
+$script:ClockDateFormat = Get-NormalizedClockDateFormat $config.ClockDateFormat
+$script:ClockDateFontSize = [int]$config.ClockDateFontSize
+$script:ClockDateTextColor = [string]$config.ClockDateTextColor
+$script:ClockDateTextColorTransparent = [bool]$config.ClockDateTextColorTransparent
+$script:ClockDateTextOutlineColor = [string]$config.ClockDateTextOutlineColor
+$script:ClockDateTextOutlineColorTransparent = [bool]$config.ClockDateTextOutlineColorTransparent
+$script:ClockDateFontFamily = [string]$config.ClockDateFontFamily
 $script:BdoTimeEnabled = [bool]$config.BdoTimeEnabled
 $script:BdoTimeFormat = [string]$config.BdoTimeFormat
 $script:BdoIconType = [string]$config.BdoIconType
@@ -264,9 +273,45 @@ $script:BossAlertPanel.Margin = New-Object System.Windows.Thickness 2, $script:B
 $script:BossAlertPanel.Visibility = [System.Windows.Visibility]::Collapsed
 $script:ContentStack.Children.Add($script:BossAlertPanel) | Out-Null
 
-$script:ClockTextGrid = New-Object System.Windows.Controls.Grid
+$script:ClockTextGrid = New-Object System.Windows.Controls.StackPanel
 $script:ClockTextGrid.Background = [System.Windows.Media.Brushes]::Transparent
+$script:ClockTextGrid.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Center
+$script:ClockTextGrid.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
 $script:ContentStack.Children.Add($script:ClockTextGrid) | Out-Null
+
+$script:ClockDateTextGrid = New-Object System.Windows.Controls.Grid
+$script:ClockDateTextGrid.Background = [System.Windows.Media.Brushes]::Transparent
+$script:ClockDateTextGrid.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Center
+$script:ClockDateTextGrid.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+
+$script:ClockDateOutlineTextBlocks = @()
+$dateOutlineOffsets = @(
+    @(-1, -1), @(0, -1), @(1, -1),
+    @(-1, 0),           @(1, 0),
+    @(-1, 1),  @(0, 1),  @(1, 1)
+)
+foreach ($offset in $dateOutlineOffsets) {
+    $outlineBlock = New-ClockDateTextBlock (Get-ClockDateTextOutlineBrush)
+    $outlineBlock.IsHitTestVisible = $false
+    $entry = [pscustomobject]@{
+        Block = $outlineBlock
+        X = [double]$offset[0]
+        Y = [double]$offset[1]
+    }
+    $script:ClockDateOutlineTextBlocks += $entry
+    $script:ClockDateTextGrid.Children.Add($outlineBlock) | Out-Null
+}
+
+$script:ClockDateOutlinePath = New-TextOutlinePath
+$script:ClockDateTextGrid.Children.Add($script:ClockDateOutlinePath) | Out-Null
+
+$script:ClockDateTextBlock = New-ClockDateTextBlock (Get-ClockDateTextBrush)
+$script:ClockDateTextGrid.Children.Add($script:ClockDateTextBlock) | Out-Null
+
+$script:ClockTimeTextGrid = New-Object System.Windows.Controls.Grid
+$script:ClockTimeTextGrid.Background = [System.Windows.Media.Brushes]::Transparent
+$script:ClockTimeTextGrid.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Center
+$script:ClockTimeTextGrid.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
 
 $script:OutlineTextBlocks = @()
 $outlineOffsets = @(
@@ -283,14 +328,14 @@ foreach ($offset in $outlineOffsets) {
         Y = [double]$offset[1]
     }
     $script:OutlineTextBlocks += $entry
-    $script:ClockTextGrid.Children.Add($outlineBlock) | Out-Null
+    $script:ClockTimeTextGrid.Children.Add($outlineBlock) | Out-Null
 }
 
 $script:TextOutlinePath = New-TextOutlinePath
-$script:ClockTextGrid.Children.Add($script:TextOutlinePath) | Out-Null
+$script:ClockTimeTextGrid.Children.Add($script:TextOutlinePath) | Out-Null
 
 $script:TextBlock = New-ClockTextBlock (Get-TextBrush)
-$script:ClockTextGrid.Children.Add($script:TextBlock) | Out-Null
+$script:ClockTimeTextGrid.Children.Add($script:TextBlock) | Out-Null
 $script:BdoTimePanel.Tag = "BdoTime"
 $script:BossAlertPanel.Tag = "BossAlert"
 $script:ClockTextGrid.Tag = "Clock"
@@ -342,6 +387,9 @@ $script:BdoTextGrid.Add_MouseRightButtonUp($rightClickHandler)
 $script:BdoTransitionTextGrid.Add_MouseRightButtonUp($rightClickHandler)
 $script:BdoTransitionTextBlock.Add_MouseRightButtonUp($rightClickHandler)
 $script:ClockTextGrid.Add_MouseRightButtonUp($rightClickHandler)
+$script:ClockDateTextGrid.Add_MouseRightButtonUp($rightClickHandler)
+$script:ClockDateTextBlock.Add_MouseRightButtonUp($rightClickHandler)
+$script:ClockTimeTextGrid.Add_MouseRightButtonUp($rightClickHandler)
 $script:TextBlock.Add_MouseRightButtonUp($rightClickHandler)
 if ($script:BossAlertTextBlock) {
     $script:BossAlertTextBlock.Add_MouseRightButtonUp($rightClickHandler)
